@@ -1,0 +1,50 @@
+{
+  "summary": "Itération 4 GlycoSoin T1D validée (backend 11/11 + frontend web complet). Backend pytest (/app/backend/tests/test_iteration4.py, 11 tests, 100 %) : PUT /api/profile persiste target_low/target_high/tir_goal + doctor_name + doctor_email (normalisé en minuscules — 'Delivered@resend.dev' → 'delivered@resend.dev'), GET /api/profile relit ces champs ; validations 400 : {target_low:200,target_high:160} → 'Plage cible invalide (borne basse < borne haute, entre 40 et 300 mg/dL)', {tir_goal:0} → 'Objectif de temps dans la cible invalide (1–100 %)', {doctor_email:'pasunemail'} → 'Adresse e-mail du médecin invalide' ; PUT partiel {name:'Alice Renamed'} conserve target_low/high/tir_goal (exclude_unset OK). GET /api/stats?days=7 avec cible personnalisée 80–160 + glycémies [75,120,170,200] renvoie target_low=80, target_high=160, tir_goal=75, hypo_count=1, hyper_count=2, readings_count=4. GET /api/report/pdf?days=30 → 200 application/pdf, %PDF header, texte extrait via pypdf contient 'Plage cible', 'Sous la cible' et '< 80'. POST /api/report/email?days=90&tz=Europe/Paris : sans Bearer → 401 ; sans doctor_email dans le profil → 400 'Renseignez l'e-mail de votre médecin dans votre profil' ; avec 5 docs déjà présents dans report_emails (24 h) → 429 'Limite de 5 envois par jour atteinte' ; avec doctor_email=delivered@resend.dev → 200 {ok:true,to:'delivered@resend.dev',days:90} + document persisté dans report_emails (envoi réel via Emergent Resend proxy vérifié, 1 seul mail envoyé en test). Frontend web (viewport 390x844, token devtest_token_123 en localStorage) : /profil affiche 'targets-card' (profile-target-low-input, profile-target-high-input, profile-tir-goal-input) et 'doctor-card' (profile-doctor-name-input, profile-doctor-email-input) ; saisie 80/160/75 + Dr Martin + delivered@resend.dev + Enregistrer → toast 'Profil enregistré' ; saisie target_low=200 → toast rouge 'Plage cible invalide : la borne basse doit être inférieure à la borne haute (40–300 mg/dL)' sans persistance côté serveur ; /stats affiche 'Temps dans la cible (80–160)', badge tir-goal-badge 'Objectif 75 % atteint' (icône check quand TIR>=75), légende 'Sous la cible < 80 · 0 %' / 'Au-dessus > 160 · 0 %', edit-targets-link visible, tuiles 'Sous cible (< 80)' et 'Au-dessus (> 160)' présentes ; doctor-report-card > email-report-button libellé 'Envoyer à Dr Martin' → toast 'Rapport envoyé à delivered@resend.dev' (envoi réel confirmé, doc report_emails ajouté) ; sans doctor_email : bouton libellé 'Envoyer à mon diabétologue', clic → toast 'Renseignez l'e-mail de votre diabétologue dans votre profil' et navigation vers /profil ; /ajouter-glycemie sans valeur affiche 'Votre plage cible : 80–160 mg/dL', valeur 170 → badge 'Hyperglycémie' orange, valeur 75 → badge 'Hypoglycémie' rouge. Profil devtest restauré à target_low=80, target_high=160, tir_goal=75, doctor_name='Dr Martin', doctor_email='delivered@resend.dev'. Aucun bug bloquant.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* styles", "issue": "'shadow*' style props are deprecated. Use 'boxShadow' (déjà signalé itération 3, toujours présent — Card/Chip/PrimaryButton/tab bar). Reference: /app/frontend/src/components/ui.tsx"},
+      {"component": "props.pointerEvents", "issue": "props.pointerEvents is deprecated. Use style.pointerEvents (déjà signalé itération 3). Reference: composants Pressable/Overlay dans /app/frontend/src/"},
+      {"component": "expo-notifications listener", "issue": "'Listening to push token changes is not yet fully supported on web' loggé sur chaque écran. Envelopper l'enregistrement du listener push dans Platform.OS !== 'web' pour supprimer le warning en preview (déjà signalé itération 3)."},
+      {"component": "navigation router.back()", "issue": "'The action GO_BACK was not handled by any navigator' loggé quand on accède à /profil directement par URL et qu'on tape sur profile-back-button (déjà signalé itération 3). Fix : router.canGoBack() ? router.back() : router.replace('/'). Reference: /app/frontend/app/profil.tsx:113"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/iteration4.xml",
+    "/app/test_reports/browser/iter4_profile.jpeg",
+    "/app/test_reports/browser/iter4_stats.jpeg",
+    "/app/test_reports/browser/iter4_email_toast.jpeg",
+    "/app/test_reports/browser/iter4_glucose.jpeg"
+  ],
+  "action_items": [
+    "Aucun correctif fonctionnel requis pour l'itération 4 : tous les backends (5 validations profil, stats personnalisées, PDF 'Plage cible', 4 cas /report/email dont limite 5/24h et envoi réel delivered@resend.dev) et flows web (profil save, TIR badge + légende + edit-targets-link, email-report-button avec deux libellés selon doctor_email, ajouter-glycemie plage cible + preview 170/75) sont fonctionnels.",
+    "Nettoyage : migrer les styles shadow* vers boxShadow et props.pointerEvents vers style.pointerEvents (warnings de dépréciation React Native web, déjà listés en itération 3).",
+    "Nettoyage : envelopper les listeners expo-notifications dans Platform.OS !== 'web' pour supprimer le warning en preview web.",
+    "Nettoyage : gérer router.canGoBack() dans /profil (et écrans modaux) pour éviter le log 'GO_BACK was not handled' quand l'écran est ouvert par URL directe."
+  ],
+  "critical_code_review_comments": [
+    "report.py L286-297 : la validation de la plage cible dans update_profile est correcte (borne basse<haute entre 40–300) mais utilise doc.get('target_low', 70) pour combler la borne manquante — si le profil n'a jamais été créé (doc None), la valeur par défaut 70 est utilisée, ce qui pourrait masquer une plage invalide. Actuellement OK car update_profile crée le profil avant validation, mais à documenter.",
+    "report.py L444-472 report_email : la limite quotidienne est vérifiée AVANT la génération PDF (bien) mais l'insertion dans report_emails se fait APRÈS l'envoi Resend réussi (bien, pas de double décompte en cas d'échec 502). Note : l'appel send_report_email peut lever HTTPException(503) si EMERGENT_EMAIL_KEY manque ; renvoyé tel quel au client (OK).",
+    "server.py L293-297 : la normalisation en minuscules du doctor_email est faite après validation regex EMAIL_RE. Le regex accepte les majuscules donc pas de faux négatif. Test confirmé : 'Delivered@resend.dev' → 'delivered@resend.dev'.",
+    "Frontend stats.tsx L60-64 : le badge 'atteint' se déclenche quand tir_in >= tir_goal (inclusif) — cohérent avec le PDF (report.py L306 : 'atteint' si tir_in >= tir_goal)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration4.py (new — 11 tests)",
+    "/app/test_reports/pytest/iteration4.xml (new — junit)",
+    "/app/test_reports/browser/*.jpeg (screenshots preview)"
+  ],
+  "success_rate": {"backend": "100% (11/11 iteration 4 + 59/59 régression non retestée)", "frontend": "100% (profil objectifs, plage cible invalide, TIR card + badge + légende + edit-targets-link, email-report-button deux libellés + toast succès + toast erreur/navigation, ajouter-glycemie plage cible + preview hyper/hypo)"},
+  "seed_data_creation": "Aucun nouvel utilisateur seed. Réutilisation de user_testalice/tok_alice_123 et user_testbob/tok_bob_456 (conftest.py). Le test de limite 5/24h insère 5 docs fictifs dans report_emails pour user_testbob puis nettoie ; test send_report_email envoie 1 e-mail réel via Resend proxy à delivered@resend.dev (sandbox Resend). Profil devtest restauré en fin de run (target 80/160/75 + Dr Martin + delivered@resend.dev).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Itération 4 (Objectifs personnels + envoi PDF au diabétologue) fully green. Backend : 11 tests dans /app/backend/tests/test_iteration4.py (à lancer avec `pytest -o addopts= test_iteration4.py` pour désactiver xdist car conftest fait un insert_many session-scope). L'extraction texte du PDF utilise pypdf (déjà installé). Limiter les envois d'e-mail réels : test_send_report_email_success envoie 1 mail à delivered@resend.dev (sandbox Resend qui accepte tout — pas de vrai destinataire). Le test 429 insère 5 docs fictifs dans report_emails plutôt que d'envoyer 5 mails. Frontend web : injecter localStorage.setItem('glycosoin_session_token','devtest_token_123') puis GOTO. Le profil devtest est laissé à 80/160/75 + Dr Martin + delivered@resend.dev. Toast success reste visible ~4 s (poll par intervalles de 300 ms si besoin). Bouton email-report-button change de libellé selon profile.doctor_email (Envoyer à ${doctor_name || doctor_email} vs Envoyer à mon diabétologue).",
+  "rca_of_issue": "N/A — itération 4 (feature addition) sans bug détecté. Note technique : mon premier test PDF cherchait 'Plage cible' dans les bytes bruts et échouait car ReportLab compresse les content streams (FlateDecode). Corrigé en utilisant pypdf.PdfReader().extract_text() qui gère la décompression."
+}

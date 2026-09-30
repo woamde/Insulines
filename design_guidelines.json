@@ -1,0 +1,161 @@
+{
+  "app_name": "GlycoSoin T1D",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "Une application de suivi du diabète de type 1 claire, médicale et rassurante, conçue pour un contrôle précis et sans effort.",
+  "color": {
+    "surface": "#F8FAFC",
+    "onSurface": "#0F172A",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1E293B",
+    "surfaceTertiary": "#F1F5F9",
+    "onSurfaceTertiary": "#475569",
+    "surfaceInverse": "#0F172A",
+    "onSurfaceInverse": "#F8FAFC",
+    "brand": "#0EA5E9",
+    "brandPrimary": "#0284C7",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#38BDF8",
+    "onBrandSecondary": "#0F172A",
+    "brandTertiary": "#E0F2FE",
+    "success": "#10B981",
+    "onSuccess": "#FFFFFF",
+    "warning": "#F59E0B",
+    "onWarning": "#FFFFFF",
+    "error": "#EF4444",
+    "onError": "#FFFFFF",
+    "info": "#06B6D4",
+    "onInfo": "#FFFFFF",
+    "border": "#E2E8F0",
+    "borderStrong": "#CBD5E1",
+    "divider": "#F1F5F9",
+    "muted": "#64748B",
+    "onBrand": "#FFFFFF"
+  },
+  "typography": {
+    "displayFontFamily": "Satoshi",
+    "textFontFamily": "Geist",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous iOS vertical rhythm, clean grouping, comfortable 16pt outer padding.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "bottom_tabs",
+  "icon_set": "Ionicons",
+  "glassmorphism": {
+    "enabled": "true",
+    "do's": [
+      "Use subtle glass blur on sticky header and bottom tab bar",
+      "Frosted card overlays on hero metrics"
+    ],
+    "dont's": [
+      "Never blur form inputs or text content",
+      "Avoid heavy dark blurs in light mode"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Dashboard",
+      "purpose": "Vue d'ensemble en temps réel de la glycémie, des doses d'insuline et des actions rapides du jour.",
+      "states": {
+        "loading": "Chargement des données de glycémie et capteurs...",
+        "empty": "Aucune mesure enregistrée aujourd'hui. Appuyez sur + pour ajouter votre première glycémie.",
+        "error": "Impossible de synchroniser le capteur. Vérifiez votre connexion."
+      },
+      "layout": "En-tête épuré avec statut du capteur CGM, carte principale de glycémie actuelle (mg/dL ou mmol/L) avec flèche de tendance, widget rapide de calcul bolus/glucides, flux chronologique des derniers événements et bouton d'action flottant."
+    },
+    {
+      "name": "Calculateur",
+      "purpose": "Calcul instantané et sécurisé de la dose d'insuline en fonction des glucides du repas et de la glycémie actuelle.",
+      "states": {
+        "loading": "Chargement de la base d'aliments...",
+        "empty": "Recherchez un aliment ou entrez les grammes de glucides pour calculer votre bolus.",
+        "error": "Erreur lors du calcul de la dose. Vérifiez vos paramètres de profil."
+      },
+      "layout": "Formulaire structuré par étapes: 1. Glycémie actuelle, 2. Glucides estimés (recherche d'aliments intégrée avec photos), 3. Résultat recommandé (bolus repas + correction) avec validation sécurisée avant administration."
+    },
+    {
+      "name": "Journal",
+      "purpose": "Historique complet et chronologique des repas avec photos, glycémies, insuline et notes personnelles.",
+      "states": {
+        "loading": "Chargement du journal...",
+        "empty": "Votre journal est vide. Enregistrez votre premier repas ou votre première mesure.",
+        "error": "Impossible de charger l'historique."
+      },
+      "layout": "Liste chronologique regroupée par moments de la journée (Petit-déjeuner, Déjeuner, Dîner, Collation) avec vignette photo du repas, indicateur coloré de glycémie et badges de dose d'insuline."
+    },
+    {
+      "name": "Statistiques",
+      "purpose": "Analyses des tendances glycémiques, temps dans la cible (TIR) et moyennes sur 7, 14 et 30 jours.",
+      "states": {
+        "loading": "Génération des graphiques d'évolution...",
+        "empty": "Pas assez de données pour afficher les statistiques sur cette période.",
+        "error": "Erreur lors du calcul des statistiques."
+      },
+      "layout": "Cartes de synthèse du Temps dans la Cible (TIR %), graphique interactif d'évolution de la glycémie, répartition des hypos/hypers et export du rapport PDF pour le médecin."
+    },
+    {
+      "name": "Profil",
+      "purpose": "Configuration des paramètres personnels de santé et des ratios d'insuline T1D.",
+      "states": {
+        "loading": "Chargement du profil...",
+        "empty": "Veuillez configurer vos paramètres glycémiques.",
+        "error": "Échec de l'enregistrement des modifications."
+      },
+      "layout": "Sections regroupées (Informations personnelles, Ratios Glucides/Insuline I/C, Facteur de sensibilité ISF, Glycémie cible) avec champs éditables sécurisés par code PIN ou biométrie."
+    }
+  ],
+  "images": {
+    "meal_sample_1": {
+      "url": "https://images.unsplash.com/photo-1543352634-a1c51d9f1fa7?auto=format&fit=crop&w=800&q=80",
+      "alt": "Repas équilibré pauvre en glucides"
+    },
+    "meal_sample_2": {
+      "url": "https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=800&q=80",
+      "alt": "Salade composée et protéines"
+    },
+    "hero_backdrop": {
+      "url": "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=1200&q=80",
+      "alt": "Ambiance médicale claire et rassurante"
+    }
+  },
+  "instructions_to_main_agent": [
+    "App UI must be entirely in French as requested in the user prompt.",
+    "Implement Type 1 Diabetes monitoring features: fast blood glucose logging, carb calculator with food database and photos, bolus insulin dosage calculator (using I/C ratio, ISF, and target glucose), logbook timeline, stats/TIR graphs, and comprehensive profile settings.",
+    "Use iOS-Native Clean personality with clean light medical aesthetic, bright surfaces (#F8FAFC, #FFFFFF), and medical blue brand accents (#0284C7).",
+    "Adhere strictly to rule: fonts max weight 500, touch targets >= 44x44pt, safe areas respected on all screens.",
+    "Ensure every screen has loading, empty, and error states fully implemented.",
+    "Use real PNG logos or high-quality Unsplash food photography for meals, never generic placeholder services."
+  ]
+}

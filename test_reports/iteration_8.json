@@ -1,0 +1,47 @@
+{
+  "summary": "Account deletion validation completed for backend + mobile-web UI (public preview URL). Verified auth/validation guards, full A/B isolation purge across collections, real storage erasure semantics (overwrite to zero bytes), pending/retry behavior, session invalidation, fresh re-auth with new user_id, and delete-account UX flows on 390x844 and 320 widths.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_account_deletion_iteration10.py",
+    "/app/test_reports/pytest/iteration10.xml",
+    "/app/test_reports/browser/iter10_login_390.jpeg",
+    "/app/test_reports/browser/iter10_delete_ui_320.jpeg",
+    "/app/test_reports/browser/iter10_pending_320.jpeg",
+    "/app/test_reports/browser/iter10_double_submit_check.jpeg",
+    "/app/test_reports/browser/iter10_deleted_notice_320.jpeg"
+  ],
+  "action_items": [
+    "Optional hardening: keep monitoring concurrent delete UX with network jitter; current request-guard test captured one DELETE call under double tap.",
+    "Optional standards fix: server.py uses fallback default for STORAGE_BASE; policy asks strict env-only URLs (fail-fast if missing)."
+  ],
+  "critical_code_review_comments": [
+    "backend/account_deletion.py: request model enforces exact confirmation Literal['SUPPRIMER'] and forbids extra fields (extra='forbid'); endpoint never accepts client user_id/email for deletion target.",
+    "backend/server.py + account_deletion.erase_photos: upload ownership is persisted before upload, foreign meal photo references are rejected, and deletion erases bytes by overwrite (managed storage without DELETE) including meal-linked and orphan uploads.",
+    "backend/auth.py: get_current_user + account_gate correctly block normal APIs with 409 while account_deletion_pending is true, while allowing DELETE /auth/account and /auth/me.",
+    "frontend/app/supprimer-compte.tsx + frontend/src/auth.tsx: destructive action disabled until checkbox, visible pending/error states, token/cache cleanup on success, login notice shown after deletion, and protected route access removed when signed out.",
+    "backend/server.py: STORAGE_BASE falls back to hardcoded integrations URL when env missing; this conflicts with strict environment-only/fail-fast policy in current infrastructure rules."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_account_deletion_iteration10.py",
+    "/app/memory/test_credentials.md",
+    "/app/test_reports/iteration_8.json"
+  ],
+  "success_rate": {
+    "backend": "100% (4/4 tests passed)",
+    "frontend": "100% for executed delete-account and auth-gate flows"
+  },
+  "seed_data_creation": "Created dedicated disposable A/B/C backend identities and disposable browser-injected UI identities/tokens. Added cross-collection records (active + archived), share links, sessions, uploads, meal-linked photo + abandoned photo + legacy soft-deleted meal photo. All disposable identities were deleted/cleaned after run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Do not reuse prior disposable tokens. For delete-flow UI auth bootstrap, inject fresh session in localStorage key 'glycosoin_session_token'. Native on-device cleanup (notifications/files caches) was code-inspected only, not device-validated.",
+  "rca_of_issue": "Failure-path injection showed expected behavior: simulated delete failure returns 503, identity/session retained with account_deletion_pending=true, user APIs return 409, public share/photo become inaccessible, and retry deletion succeeds with final token invalidation (401)."
+}

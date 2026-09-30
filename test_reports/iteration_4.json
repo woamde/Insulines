@@ -1,0 +1,54 @@
+{
+  "summary": "Itération 5 GlycoSoin T1D (unités mmol, activité physique, partage proche) : backend 100 % (12/12) et frontend web quasi complet. Backend pytest /app/backend/tests/test_iteration5.py : PUT /api/profile {glucose_unit:'mmol'} → 200 + GET renvoie 'mmol' ; {glucose_unit:'xx'} → 400 'Unité invalide (mgdl ou mmol)'. POST /api/activity {course/40/intense + started_at ISO} → 200 ; validations 400 : type 'bad', intensity 'bad', duration 3 et 700. GET /api/activity retourne effect{before_avg=150, after_avg=95, delta=-55, hypo_after=false} avec glycémies 150 mg/dL 1 h avant et 95 mg/dL 1 h après la fin ; ajout d'une glycémie 65 → hypo_after=true. DELETE /api/activity/{id} → l'entrée disparaît. Isolation : Bob DELETE /api/activity/{aliceId} renvoie 200 mais l'entrée reste chez Alice (soft-delete scopée par user_id, OK). GET /api/stats?days=7 avec 2 activités (20+45 min) → activity_count=2, activity_minutes=65. GET /api/report/pdf?days=30 après ajout d'une séance → 200 application/pdf, texte contient 'Activité'. POST /api/share {label:'Maman'} → 200 {id, token (27 chars), label:'Maman', views:0} ; label vide → 'Proche' ; 6e lien actif → 400 'Maximum 5 liens de partage actifs'. GET /api/shared/{token} SANS Authorization → 200 avec {owner_name, label, unit, target_low, target_high, latest{value_mgdl, delta, measured_at, source}, summary_24h{readings_count, avg, tir_in, hypo_count, carbs_g, bolus_units, basal_units}, series, generated_at} ; views incrémenté et last_viewed_at rempli après GET. Token inconnu (30 chars) → 404 'Ce lien de partage n'existe plus' ; token court 'abc' → 404 'Lien de partage introuvable'. DELETE /api/share/{id} par Alice → GET /api/shared/{token} → 404. Bob DELETE /api/share/{aliceShareId} → renvoie 200 mais ne modifie pas le lien d'Alice (isolation par user_id OK). Profil devtest restauré : glucose_unit='mgdl', target_low=80, target_high=160, tir_goal=75. Frontend web (viewport 390x844, token devtest_token_123 en localStorage) : /profil affiche unit-card avec unit-mmol/unit-mgdl ; clic unit-mmol convertit profile-target-low-input 80→4,4 et profile-target-high-input 160→8,9, suffixe passe en mmol/L, save → toast 'Profil enregistré' ; l'accueil affiche 7,5 mmol/L (135 mg/dL converti) ; /ajouter-glycemie affiche 'Mesure capillaire en mmol/L' et 'Votre plage cible : 4,4–8,9 mmol/L', saisie 6,5 → badge '6,5 mmol/L Dans la cible'. Activité : /ajouter-activite → sélection activity-type-velo + activity-duration-45 + activity-intensity-moderee + activity-end-60 + activity-save-button → toast 'Activité enregistrée' ; accueil montre 'Vélo · 45 min' ; /journal filtre journal-filter-activite affiche Vélo ; /stats affiche activity-chart-hint et glucose-chart ; retour /ajouter-activite → activity-history-card avec 2× activity-effect-* ; activity-delete-* → toast 'Activité supprimée'. Partage : /profil → share-settings-link → /partage ; saisie 'Papa' + share-create-button → toast 'Lien créé pour Papa' + share-row-* ; share-copy-* → toast 'Lien copié' ; share-revoke-* → toast 'Lien révoqué' et la ligne disparaît. SANS jeton : /proche/<token valide existant Maman> affiche shared-owner-name/shared-latest-value/shared-summary-card/shared-chart-card (7,5 · Dans la cible · 135 mg/dL) sans redirection vers login ; /proche/<token inexistant 30 chars> affiche shared-error 'Lien indisponible · Ce lien de partage n'existe plus'. BUG : la racine / (SANS jeton) est redirigée vers /proche/undefined et affiche 'Lien indisponible' au lieu du login — contredit la spec 'La racine / affiche toujours le login' (voir action_items). /login sans jeton affiche correctement 'Continuer avec Google'.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "app/_layout.tsx (routing racine)", "issue": "La racine / SANS session est routée vers /proche/undefined et affiche 'Lien indisponible' (shared-error) au lieu du login. Expo Router route probablement / vers la première route déclarée (proche/[token]) car il n'existe pas de route index publique. Reference: /app/frontend/app/_layout.tsx:39-58. Fix suggéré : ajouter un Stack.Screen name='index' non protégé qui redirige vers /login quand !signedIn, OU garder proche/[token] mais s'assurer que la racine résout vers login/(tabs) et pas vers /proche/[token].", "testID": "shared-error (au lieu de login-screen)", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* styles", "issue": "'shadow*' style props are deprecated. Use 'boxShadow'. Toujours présent (déjà signalé itérations 3 et 4). Reference: /app/frontend/src/components/ui.tsx"},
+      {"component": "expo-notifications listener", "issue": "'Listening to push token changes is not yet fully supported on web' loggé sur chaque écran. Envelopper le listener dans Platform.OS !== 'web'. Déjà signalé itérations 3 et 4."},
+      {"component": "navigation router.back()", "issue": "'The action GO_BACK was not handled by any navigator' loggé quand on accède à /profil ou /ajouter-activite directement par URL et qu'on tape sur le bouton retour. Déjà signalé itérations 3 et 4. Fix : router.canGoBack() ? router.back() : router.replace('/')."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration5.py",
+    "/app/test_reports/pytest/iteration5.xml",
+    "/app/test_reports/browser/iter5_proche_public.jpeg",
+    "/app/test_reports/browser/iter5_root_login.jpeg",
+    "/app/test_reports/browser/iter5_profil_mmol.jpeg",
+    "/app/test_reports/browser/iter5_home_mmol.jpeg",
+    "/app/test_reports/browser/iter5_ajouter_glucose_mmol.jpeg",
+    "/app/test_reports/browser/iter5_home_after_activity.jpeg",
+    "/app/test_reports/browser/iter5_activity_history.jpeg",
+    "/app/test_reports/browser/iter5_partage.jpeg",
+    "/app/test_reports/browser/iter5_shared_error.jpeg"
+  ],
+  "action_items": [
+    "PRIORITÉ HAUTE — Corriger la route racine : sans session, GET / doit afficher /login. Actuellement Expo Router résout / vers /proche/undefined (car proche/[token] est la seule route non-protégée déclarée en premier dans app/_layout.tsx). Ajouter un fichier app/index.tsx qui redirige vers /login (si !signedIn) ou /(tabs) (si signedIn), OU déclarer explicitement un Stack.Screen name='index' avec redirection conditionnelle.",
+    "Nettoyage : migrer les styles shadow* vers boxShadow (warnings de dépréciation, déjà listés itérations 3 et 4).",
+    "Nettoyage : envelopper les listeners expo-notifications dans Platform.OS !== 'web'.",
+    "Nettoyage : gérer router.canGoBack() dans /profil, /ajouter-activite et autres écrans modaux pour éviter 'GO_BACK was not handled' quand l'écran est ouvert par URL directe."
+  ],
+  "critical_code_review_comments": [
+    "tracking.py L297-336 shared_view : GET /api/shared/{token} incrémente views ET last_viewed_at à chaque appel (bien) ; token < 20 chars → 404 (bien) ; ne consulte PAS profile.name si celui-ci vaut 'Profil' (défaut) et retombe sur users.name (bien). Attention : le lookup `db.users.find_one({\"user_id\": uid})` fonctionne si les users sont enregistrés via l'auth Google normale — pas de bug détecté.",
+    "tracking.py L260-261 create_share : la limite est count >= 5, donc 5 liens actifs autorisés, le 6e renvoie 400. Conforme à la spec (« 6e lien actif → 400 »).",
+    "tracking.py L282-286 revoke_share : renvoie {ok: true} même si le _id n'appartient pas à l'utilisateur (update_one sans match). Non-critique car scopé par user_id dans le filtre — le lien reste actif. Testé : Bob ne peut pas révoquer le lien d'Alice (isolation confirmée).",
+    "server.py L297-298 : validation glucose_unit ∈ {mgdl, mmol} avec 400 explicite. OK.",
+    "_layout.tsx L39-58 : Stack.Protected fonctionne correctement pour /login (visible sans session) et /(tabs)/profil/partage/etc. (visible avec session). Mais la route index (/) n'est pas explicitement gérée dans les deux branches — d'où le fallback vers proche/[token] qui matche / avec [token]=undefined. Bug de routage.",
+    "units.ts L7-13 : mgdlToMmol/mmolToMgdl utilise facteur 18.016 avec arrondi à 1 décimale (mmol) et arrondi entier (mg/dL). 80 mg/dL → 4,4 mmol/L confirmé ; 160 → 8,9 confirmé ; 110 → 6,1 (non testé mais formule OK)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration5.py (nouveau — 12 tests)",
+    "/app/test_reports/pytest/iteration5.xml (nouveau — junit)",
+    "/app/test_reports/browser/iter5_*.jpeg (screenshots preview)"
+  ],
+  "success_rate": {"backend": "100% (12/12 iteration 5, régressions itérations 1-4 non retestées)", "frontend": "~90% (unité mmol, activité complète, partage complet, vue publique OK ; 1 bug de routage racine / → /proche/undefined sans session)"},
+  "seed_data_creation": "Réutilisation de user_testalice/tok_alice_123 et user_testbob/tok_bob_456 (conftest.py). Les tests d'activité et de share nettoient leurs données via fixtures. Le test 'max 5 shares' crée 5 puis vérifie que le 6e renvoie 400, puis nettoie. Profil devtest restauré en fin de run (glucose_unit='mgdl', target_low=80, target_high=160, tir_goal=75) via test_zzz_restore_devtest_profile.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Itération 5 : backend fully green (12/12). Frontend : la vue publique /proche/[token] fonctionne parfaitement (avec et sans session), l'unité mmol/L convertit correctement les cibles et l'accueil, l'activité physique est complète (create/liste/effet/supprime, filtres journal, hint stats), le partage crée/copie/révoque des liens sans problème. UN SEUL bug bloquant : la racine / sans session est routée vers /proche/undefined (affiche 'Lien indisponible' au lieu du login). Cause : app/_layout.tsx déclare proche/[token] avant les Stack.Protected et il n'existe pas de fichier app/index.tsx public. Fix : soit créer app/index.tsx qui redirige selon signedIn, soit modifier _layout.tsx pour déclarer index protégé (redirection dans le rendu). Après fix, retester la route / sans session (doit voir 'Continuer avec Google') ET avec session (doit voir l'accueil). Lancer test_iteration5.py avec `pytest -o addopts= test_iteration5.py` (xdist désactivé, conftest a des inserts session-scope).",
+  "rca_of_issue": "Route racine / redirigée vers /proche/undefined sans session. RCA : dans app/_layout.tsx, le Stack déclare `<Stack.Screen name=\"proche/[token]\" />` comme unique route non-protégée. Quand un visiteur non authentifié atteint /, Expo Router ne trouve aucune route index correspondante ; il tombe sur proche/[token] avec token=undefined et affiche shared-error. Reproduction : localStorage.clear() puis GET / → URL devient /proche/undefined avec écran 'Lien indisponible'. Fix : créer app/index.tsx qui exécute `useAuth()` puis Redirect vers /login (si !user) ou /(tabs) (si user)."
+}

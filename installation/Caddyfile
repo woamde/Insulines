@@ -1,0 +1,9 @@
+{$APP_HOST} {
+    tls internal
+    encode gzip
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+    }
+    reverse_proxy app:{$API_PORT}
+}

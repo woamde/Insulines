@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 8 GlycoSoin T1D — Bug fix `auth.persist_session` idempotent (fix crash 500 sur reconnexion Google APK, DuplicateKeyError sur user_sessions.session_token). Backend pytest test_iteration8.py : 8/8 OK. (a) 2 appels persist_session(email='Dup.Test@Example.com' puis 'dup.test@example.com', même session_token) → aucune exception, 1 seul doc users (email normalisé en minuscules), 1 seul doc user_sessions, user_id stable, expires_at renouvelé (~+7 j, delta 6.5-7.5j vérifié). (b) 2 tokens différents pour le même e-mail → 2 sessions, 1 user, même user_id. (c) GET /api/auth/me avec Bearer du token stocké → 200 avec email='dup.test@example.com' (minuscules) et user_id 'user_xxx'. (d) POST /api/auth/session {session_id:'invalide'} → 401 detail='Connexion Google échouée' (jamais 500) ; body {} → 422. (e) Régression : GET /api/profile sans Bearer → 401 ; avec Bearer devtest_token_123 → 200 (contient target_low/target_high). (f) GET /api/ai/models avec Bearer → 200 avec 4+ modèles (default=claude-sonnet-4-6, models list Claude/Gemini). Nettoyage automatique via fixture mongo_sync des enregistrements dup.test@example.com / iter8_dup_* avant/après chaque test. Frontend web (viewport 390x844) : (1) sans jeton → écran login avec [data-testid=google-signin-button] visible et texte 'Continuer avec Google' — OK. (2) localStorage.setItem('glycosoin_session_token','devtest_token_123') + goto / → écran d'accueil rendu (login button disparu, dashboard 'Bonsoir' + FreeStyle Libre + Dernière glycémie 135) — OK. (3) localStorage vidé + goto '/#session_id=faux_session_123' (via about:blank pour forcer full reload) → écran login reste affiché sans écran blanc ni crash, root innerHTML 5268 chars, réseau capturé : 1 x POST /api/auth/session → 401. Logs backend confirment plusieurs POST /api/auth/session avec 401/422/200, aucun 500. Le fix persist_session résout bien le bug utilisateur signalé.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration8.py",
+    "/app/test_reports/pytest/iteration8.xml",
+    "/app/test_reports/browser/iter8_home.jpeg",
+    "/app/test_reports/browser/iter8_invalid_session3.jpeg"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "auth.persist_session (L58-87) : upsert user par email normalisé (strip().lower()), fallback DuplicateKeyError→relookup pour race créations concurrentes. update_one avec upsert=true sur user_sessions par session_token — idempotent. $setOnInsert created_at préserve la date initiale ; $set renouvelle expires_at à chaque échange. Correct et couvert par tests (a)+(b).",
+    "server.py L523 : init_auth(db) appelé avant register_auth ; ensure_indexes créé au startup (email/user_id/session_token uniques + TTL expires_at). Correct.",
+    "auth.register_auth create_session : try/except httpx.HTTPError → 503 ; response.status_code != 200 → 401 detail='Connexion Google échouée' (jamais 500). Vérifié en test (d).",
+    "frontend auth.tsx exchangeSession L67-97 : lit body.detail JSON → propage dans lastErrorRef, retourne false. Login.tsx handleSignIn affiche 'Connexion Google refusée : <detail>' via toast — bon retour utilisateur.",
+    "auth.tsx bootstrap (L125-155) : sur web, extractSessionId depuis window.location.href, appelle exchangeSession, replaceState pour nettoyer l'URL. Sur échec 401, loading passe à false et user reste null → RootNavigator affiche l'écran login (guard sur user==null). Confirmé par le test (3).",
+    "Aucun autre régression détectée. Endpoints protégés continuent de retourner 401 sans Bearer (test e)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration8.py (nouveau — 8 tests, tous passent)",
+    "/app/test_reports/pytest/iteration8.xml (JUnit)",
+    "/app/test_reports/browser/iter8_*.jpeg (captures web preview)"
+  ],
+  "success_rate": {"backend": "100% (8/8 iteration 8)", "frontend": "100% (login/home/invalid-session-flow)"},
+  "seed_data_creation": "Utilise conftest.py existant (Alice/Bob/tokens + user_devtest via /app/memory/test_credentials.md). Tests iter8 utilisent Dup.Test@Example.com + tokens iter8_dup_* — nettoyés avant/après par fixture mongo_sync. Aucun utilisateur réel (gmail) ni user_devtest touché.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 8 validé (persist_session idempotent). Backend 8/8, frontend 3/3. Le fix protège contre DuplicateKeyError sur reconnexion Emergent (jeton identique). Tests confirment : email normalisé lowercase, upsert user_sessions par token, expires_at renouvelé, /api/auth/session ne renvoie plus jamais 500 (uniquement 401/422). Pour re-tester ce bug : `pytest -o addopts= test_iteration8.py`. Note : dans le browser test, pour vraiment déclencher un full page reload avec un fragment session_id, il faut passer par about:blank entre les navigations, sinon expo-router ne remonte pas AuthProvider.",
+  "rca_of_issue": "Bug initial : `POST /api/auth/session` faisait insert_one dans user_sessions, alors que session_token a un index unique. Emergent OAuth peut renvoyer le même session_token lors d'une reconnexion (même utilisateur, même appareil), ce qui déclenchait DuplicateKeyError → 500 côté serveur ; en APK, sans détail lisible côté client, la connexion échouait silencieusement après quelques déploiements. Fix appliqué : `persist_session` transforme les 2 opérations en upserts (user par email normalisé, session par session_token) + gère DuplicateKeyError concurrent sur la création user via relookup. Reproduction validée : appeler 2× persist_session avec même token → aucune exception. Vérification serveur : logs backend montrent 401/422/200 sur /api/auth/session, plus aucun 500. Le message d'erreur détaillé est désormais propagé au frontend via toast (auth.tsx L76-85 + login.tsx L27)."
+}

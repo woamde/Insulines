@@ -1,0 +1,23 @@
+{
+  "source_report": "iteration_9.json",
+  "resolved_issue": "PNG icons 192x192 and 512x512 added to manifest and exported assets",
+  "verification": {
+    "backend_tests": "12 passed, pytest/iteration11_final.xml",
+    "real_browser_png_requests": "HTTP 200, decoded dimensions 192x192 and 512x512",
+    "real_chromium_cdp_installability_errors": [],
+    "typescript_and_lint": "pass",
+    "production_web_export": "pass",
+    "source_archive": "101 files, sensitive environment and data excluded",
+    "clean_python_install": "pass: exact locked versions, checksum retained, --no-deps followed by pip check",
+    "dependency_check_result": "No broken requirements found."
+  },
+  "not_verified": [
+    "Full Docker runtime (Docker absent in this environment)",
+    "PowerShell execution on Windows",
+    "Certificate trust and real OS installation on user Windows/Ubuntu machines",
+    "Real Google OAuth callback on private HTTPS origin",
+    "Managed online services from the local installation"
+  ],
+  "implementation_mocks": false,
+  "test_only_simulation": "User acceptance/cancellation of OS install dialog was simulated in initial UI tests; later Chromium installability diagnostics were real."
+}

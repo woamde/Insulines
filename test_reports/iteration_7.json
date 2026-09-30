@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 9 GlycoSoin T1D — Coach IA multi-modèles (Claude/GPT/Gemini) + rappel de recontrôle hypo + choix du patient LibreLinkUp. BACKEND pytest test_iteration9.py : 7/7 OK. (1) GET /api/ai/models sans Bearer → 401. Avec Bearer devtest_token_123 → 200 avec 6 modèles ; clés 'gpt-5.4' et 'gpt-5.4-mini' présentes avec provider 'OpenAI' + Claude + Gemini (default 'claude-sonnet-4-6'). (2) GET /api/ai/coach sans Bearer → 401. (3) GET /api/ai/coach?days=14&model=gpt-5.4-mini avec 2e utilisateur sans glycémies (user_iter9_nogluc, semé/nettoyé via fixture Mongo) → 400 detail contient 'glyc'. (4) GET /api/ai/coach?days=14&model=gpt-5.4-mini avec Bearer devtest (≥5 glycémies) → 200 UN SEUL appel réel : body contient days=14, model='gpt-5.4-mini', model_label non vide, created_at ISO, report{overview non-vide, insulin[], food[], activity[], patterns[], doctor_questions[], alert:string}. Compteur ai_coach_reports du user_devtest augmente exactement de +1 (vérifié via count_documents avant/après). (5) POST /api/cgm/test source=libre identifiants factices → 400 detail non vide (Abbott refuse). (6) Inspection code cgm.py : succès expose bien 'patients': patients (list) + 'selected_patient' ; fetch_libre remplit _libre_patients / _libre_selected_patient. FRONTEND (web viewport 390x844) : (A) Accueil coach-card visible → clic → /coach → coach-settings-card + toutes les puces coach-period-7/14/30/90 + puce coach-model-gpt-5.4-mini visibles → sélection 14 j + gpt-5.4-mini + clic coach-run-button → coach-report apparaît en ~15-30 s avec coach-overview + 5 sections coach-section-* (patterns, insulin, food, activity, doctor_questions). Screenshot iter9_coach_report.jpeg. (B) Hypo recheck : quick-add-glucose-button → saisie 62 → save → toast 'Hypo enregistrée · recontrôlez dans 15 min' affiché ; retour home → hypo-recheck-banner visible avec texte 'Hypo à HH:MM · recontrôle conseillé à HH:MM' (HH+15 min) ; clic banner → ouvre /ajouter-glycemie ; saisie 130 → save → retour home et bannière disparaît (car dernière glycémie 130 > target_low 80). Screenshot iter9_hypo_banner.jpeg. Nettoyage : suppression des 2 glycémies de test via DELETE /api/glucose/{id} (retour {'ok':true}). (C) /cgm → clic 'Modifier les identifiants' → sélection région Europe/Libre → e-mail+mot de passe factices → clic cgm-test-button → cgm-test-result visible avec le message Abbott 'Abbott refuse ces identifiants...' ; aucun cgm-patient-card (comme attendu pour échec). Screenshot iter9_cgm_libre.jpeg. AI : 2 appels réels au total consommés (1 backend + 1 frontend), tous deux gpt-5.4-mini, comme demandé. Abbott : 2 appels test (backend + frontend), tous 400.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration9.py",
+    "/app/test_reports/pytest/iteration9.xml",
+    "/app/test_reports/browser/iter9_coach_report.jpeg",
+    "/app/test_reports/browser/iter9_hypo_banner.jpeg",
+    "/app/test_reports/browser/iter9_hypo_flow.jpeg",
+    "/app/test_reports/browser/iter9_cgm_libre.jpeg"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ai.py L18-33 : TEXT_MODELS + MODEL_LABELS incluent bien gpt-5.4 et gpt-5.4-mini (provider openai), en plus de Claude Sonnet/Haiku et Gemini 3.1 Pro/Flash. La route GET /api/ai/models renvoie provider='OpenAI' pour ces 2 clés (L95-96). Cohérent avec le testID côté front coach-model-gpt-5.4-mini.",
+    "ai.py L214-314 (endpoint /ai/coach) : cap days ∈ [7,90], profil→target_low/high, agrège 6 collections avec deleted_at:null (readings/meals/doses/activities/weight) et ventile par tranches horaires Europe/Paris + effet des activités et repas 2 h après. Prompt strict JSON, _extract_json + fallback si overview manquant. Insertion ai_coach_reports avec created_at UTC. Retourne days/model/model_label/report/created_at ISO. Comportement identique validé par test (4).",
+    "ai.py L215 : model=str défaut DEFAULT_TEXT_MODEL ; L300 _new_chat fait .get(model_key, TEXT_MODELS[DEFAULT_TEXT_MODEL]) → un modèle inconnu retombe silencieusement sur claude-sonnet-4-6 (pas d'erreur 400). Comportement voulu d'après le brief ('tomber sur le modèle par défaut'). Note code review : envisager de logger.warning quand model est inconnu pour tracer les mauvaises intégrations client, mais fonctionnellement OK.",
+    "cgm.py L455-485 (POST /api/cgm/test) : réponse succès expose 'patients' (liste [{id,name}] tirée de _libre_patients) + 'selected_patient' (fallback ''), et message dynamique ' · N patients suivis : choisissez le bon ci-dessous' si N>1. fetch_libre L308-312 remplit ces champs à partir des connexions LibreLinkUp. Correct.",
+    "frontend/app/ajouter-glycemie.tsx L42-58 : après add.mutate, si parsed < targets.low appelle scheduleHypoRecheck(15) et affiche toast 'Hypo enregistrée · rappel de recontrôle dans 15 min' ou 'Hypo enregistrée · recontrôlez dans 15 min' (variante web où notifs indisponibles). Validé en test frontend.",
+    "frontend/app/(tabs)/index.tsx L260-269 : bannière hypo-recheck-banner conditionnée par latest.value_mgdl < targets.low ET dernière mesure < 60 min. Utilise formatTime + latest.measured_at+15min. Ferme parfaitement dès qu'une glycémie ≥ target_low arrive. Bon UX.",
+    "frontend/src/notifications.ts L112-131 : scheduleHypoRecheck retourne false si permissions non accordées ou plateforme web (module non chargé) → toast affiche la variante 'recontrôlez dans 15 min' au lieu de 'rappel de recontrôle'. Conforme au brief.",
+    "frontend/app/coach.tsx : bien câblé sur useAiModels + useCoach, gère isPending → label 'Analyse en cours…', affiche coach-alert conditionnel, coach-overview + 5 sections coach-section-{patterns,insulin,food,activity,doctor_questions}. testIDs cohérents avec les tests frontend."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration9.py (nouveau — 7 tests, tous passent)",
+    "/app/test_reports/pytest/iteration9.xml (JUnit)",
+    "/app/test_reports/browser/iter9_*.jpeg (captures web preview)",
+    "/app/test_reports/iteration_7.json"
+  ],
+  "success_rate": {"backend": "100% (7/7 iteration 9)", "frontend": "100% (coach IA + hypo recheck + CGM Libre test)"},
+  "seed_data_creation": "Test iteration 9 crée un 2e utilisateur (user_iter9_nogluc / tok_iter9_nogluc) via fixture module-scope pour vérifier le 400 'Pas assez de glycémies'. Nettoyé automatiquement avant/après par la fixture Mongo. Aucun utilisateur réel touché. Sur le frontend, les 2 glycémies de test (62 et 130 mg/dL) créées via le UI ont été supprimées à la fin du test via DELETE /api/glucose/{id}.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Itération 9 100% validée. Coach IA gpt-5.4-mini fonctionne bout en bout (front + back). Bannière hypo apparaît/disparaît correctement sur home selon la dernière glycémie. CGM /test schéma expose patients[]+selected_patient (vérifié par lecture de cgm.py, pas d'appel réel à Abbott en succès). Note: sur web, notifications non supportées → toast propose la variante sans rappel (attendu). Router.back() échoue si /ajouter-glycemie est ouvert directement (pas via home) → tester en passant par le bouton quick-add-glucose-button.",
+  "rca_of_issue": "N/A — feature addition validée."
+}

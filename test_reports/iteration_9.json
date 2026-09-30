@@ -1,0 +1,54 @@
+{
+  "summary": "Exécution complète backend+frontend demandée sur l’export PWA, la confidentialité du bundle, le serveur web local, les scripts d’installation et les régressions API avec identité jetable supprimée en fin de test.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Installabilité Chromium réelle",
+        "issue": "Le manifeste ne déclare qu’une icône SVG sizes=any. Critères installabilité desktop peuvent exiger icônes PNG 192x192 et 512x512 selon environnement Chromium.",
+        "affected_testIDs": [
+          "web-install-help-button",
+          "web-install-confirm-button"
+        ]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration11_pwa_and_regression.py",
+    "/app/test_reports/pytest/iteration11.xml",
+    "/app/test_reports/browser/iter11_preview_load_390.jpeg",
+    "/app/test_reports/browser/iter11_ui_pwa_checks.jpeg",
+    "/app/test_reports/browser/iter11_ui_probe_320.jpeg"
+  ],
+  "action_items": [
+    "Ajouter des icônes PNG manifest (au moins 192x192 et 512x512) en plus du SVG pour maximiser l’installabilité Chromium réelle.",
+    "Valider manuellement sur machines Windows/Ubuntu réelles: invite d’installation navigateur, confiance certificat Caddy et callback Google sur HTTPS privé.",
+    "Optionnel: exposer un test manuel documenté pour vérifier installabilité DevTools (Application tab) hors headless."
+  ],
+  "critical_code_review_comments": [
+    "export-local-web.mjs force EXPO_PUBLIC_BACKEND_URL vide et bundle dist ne contient ni URL preview ni secrets; API compilée résout same-origin (/api).",
+    "sw.js respecte la contrainte privacy: cache strict de /offline.html, /pwa-icon.svg, /manifest.webmanifest; exclut /api et navigations médicales persistées.",
+    "web_app.py bloque traversal/dotfiles, garde /api en 404 JSON, fallback deep-link vers index pour /profil et /proche/:token, et applique no-store + nosniff.",
+    "Les réponses API protégées injectent bien Cache-Control: no-store + Pragma: no-cache via middleware backend."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration11_pwa_and_regression.py",
+    "/app/memory/test_credentials.md",
+    "/app/test_reports/iteration_9.json"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 tests pass)",
+    "frontend": "95% (flows UI/PWA testés; installabilité OS réelle non vérifiable ici)"
+  },
+  "seed_data_creation": "Création d’une identité jetable user_iter11_<uuid>/tok_iter11_<uuid> pour régression API, supprimée via endpoint puis teardown DB.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Docker CLI absent dans cet environnement (docker --version: command not found), PowerShell absent; validation runtime Docker/Windows natif/cert trust non exécutée. Tests Playwright d’acceptation/dismiss/error de l’installation basés sur simulation d’événements navigateur (MOCKED), pas sur installation OS réelle.",
+  "rca_of_issue": "Cause probable du risque d’installabilité: manifest actuel expose seulement pwa-icon.svg sizes=any. Sur certains Chromium, l’absence de PNG 192/512 peut empêcher ou dégrader l’installation PWA malgré HTTPS, SW et manifest présents. Mitigation: ajouter PNG 192/512 et pointer ces assets dans manifest.webmanifest."
+}

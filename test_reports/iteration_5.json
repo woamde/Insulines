@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 7 GlycoSoin T1D (import CSV LibreView, alertes hypo par e-mail aux proches, bouton « Tester les identifiants » CGM, fix crash Expo Go Android via import paresseux d'expo-notifications). Backend pytest test_iteration7.py : 10/10 OK. LibreView FR : POST /api/import/libreview avec CSV FR synthétique (1 type 0 mg/dL 112, 1 type 1 scan 140, 1 rapide 5U, 1 lente 12U, 1 glucides 50 g, 1 date illisible) → 200 {readings_parsed:2, readings_inserted:2, insulin_inserted:2 (bolus+basale), meals_inserted:1, skipped:1}. Heure Paris 08:00 → UTC 06:00 (juin, DST +02) confirmée via GET /api/glucose. source='libre', note='Import LibreView', kinds insulin bolus/basale, meal name='Repas (import LibreView)' carbs_g=50. Rejeu du même lot → 0/0/0 inséré (dédoublonnage par (measured_at à la minute, value)). Variante ANGLAISE (Device Timestamp, Historic Glucose mg/dL, Rapid-Acting Insulin (units), Long-Acting Insulin (units), Carbohydrates (grams), Strip Glucose mg/dL) avec '06-15-2026 08:00 AM' → 200 inséré. Variante mmol/L (en-tête 'Historic Glucose mmol/L', valeur 6.2) → value_mgdl 112 (6.2×18.016 ≈ 111.7 → 112). Sans en-tête (aucune colonne 'record type'/'type d'enregistrement') → 400. >6000 lignes → 400. Sans Bearer → 401. Share alertes hypo : POST /api/share {label:'Papa', alert_email:'delivered@resend.dev'} → 200 avec alert_email retourné ; alert_email 'bad-email' → 400 ; profil target_low=80 puis POST /api/glucose {value_mgdl:58} → 200, tempo 3s, GET /api/share → row.alerts_sent=1 (1 envoi réel via Resend). 2e POST 55 immédiat → alerts_sent reste 1 (cooldown 60 min via last_alert_at). Glycémie 120 → alerts_sent inchangé. Glycémie 58 avec measured_at il y a 5 h → alerts_sent inchangé (mesure >2 h ignorée). PATCH /api/share/{id} {alert_email:''} → 200 alert_email vide. PATCH d'un share de Bob par Alice → 404. Total : 1 e-mail réel envoyé, sous la limite. CGM test : POST /api/cgm/test avec source='libre',region='fr',user/pw fictifs → 400 detail commençant par 'Abbott refuse ces identifiants (e-mail ou mot de passe). Vérifiez…' (2 appels réels Abbott qui répondent status 2 — sous limite). GET /api/cgm/status avant/après identique (rien enregistré). Sans Bearer → 401. Frontend web (viewport 390x844, token devtest_token_123 en localStorage) : /rappels → carte reminders-web-info visible, reminders-save-button visible, clic → toast 'Rappels enregistrés' (import paresseux d'expo-notifications OK, aucune erreur JS sur web). /partage → share-alert-email-input présent ; saisie 'Tante' + delivered@resend.dev + share-create-button → toast 'Lien créé pour Tante' + ligne avec 'Alerte hypo → delivered@resend.dev' visible ; clic sur share-alert-toggle-* → révèle share-alert-input-* et share-alert-save-* ; vider + save → toast 'Alerte hypo désactivée' + texte 'Ajouter une alerte hypo par e-mail' présent ; puis révocation des liens de test. /cgm → cgm-edit-button ouvre l'éditeur ; sélection cgm-source-libre affiche cgm-libre-guide (4 étapes) ; saisie e-mail/pw factices + cgm-test-button → cgm-test-result affiche 'Abbott refuse ces identifiants (e-mail ou mot de passe). Vérifiez : 1) il s'agit bien du compte de l'application LibreLinkUp (suiveur), pas de LibreLink/LibreView ; 2) aucun espace avant/après ; 3) le mot de passe LibreLinkUp…'. /profil → import-settings-link présent ; /import-libreview → import-steps-card + import-pick-button rendus.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* styles", "issue": "'shadow*' style props are deprecated. Use 'boxShadow'. (déjà signalé it. 3-5). Reference: /app/frontend/src/components/ui.tsx"},
+      {"component": "navigation router.back()", "issue": "'The action GO_BACK was not handled by any navigator' loggé quand /rappels est ouvert par URL directe et le save appelle router.back(). Fix : router.canGoBack() ? router.back() : router.replace('/'). Reference: /app/frontend/app/rappels.tsx:81"},
+      {"component": "props.pointerEvents deprecated", "issue": "'props.pointerEvents is deprecated. Use style.pointerEvents' loggé sur plusieurs écrans (react-native-web). Nettoyage cosmétique."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration7.py",
+    "/app/test_reports/pytest/iteration7.xml",
+    "/app/test_reports/browser/iter7_rappels.jpeg",
+    "/app/test_reports/browser/iter7_partage.jpeg",
+    "/app/test_reports/browser/iter7_cgm.jpeg",
+    "/app/test_reports/browser/iter7_cgm_test.jpeg",
+    "/app/test_reports/browser/iter7_import.jpeg",
+    "/app/test_reports/browser/iter7_profil.jpeg",
+    "/app/test_reports/browser/iter7_share_after_disable.jpeg"
+  ],
+  "action_items": [
+    "Nettoyage : router.canGoBack() ? router.back() : router.replace('/(tabs)') dans /rappels et autres écrans modaux ouverts par URL directe (warning 'GO_BACK was not handled').",
+    "Nettoyage : migrer les styles shadow* vers boxShadow (warnings, déjà listés it. 3-5).",
+    "Nettoyage : props.pointerEvents → style.pointerEvents (react-native-web déprécie l'ancien usage)."
+  ],
+  "critical_code_review_comments": [
+    "importer.py L67-88 : détection d'en-tête via 'record type' OU 'type d'enregistrement' (avec ou sans apostrophe typographique). _find_col tolère variantes FR/EN. mmol détecté si 'mmol' dans l'en-tête historique/scan. OK.",
+    "importer.py L100-108 : filtre 20 ≤ value ≤ 600 mg/dL après conversion mmol×18.016. Cohérent.",
+    "importer.py L136-151 : dédoublonnage par (measured_at tronqué à la minute, round(value_mgdl)) pour glucose, (injected_at, round(units,1)) pour insuline, (eaten_at, round(carbs_g)) pour repas. Correct et testé.",
+    "tracking.py L105-152 notify_hypo_if_needed : filtre mesure < 2h, target_low profil, cooldown 60 min via last_alert_at + $inc alerts_sent. Envoi via Resend (send_report_email) enveloppé try/except pour ne jamais bloquer l'enregistrement. Correct.",
+    "cgm.py L143-152 LIBRE_STATUS_MESSAGES[2] : message français commence bien par 'Abbott refuse ces identifiants'. Conforme à la spec.",
+    "cgm.py L449-474 test_cgm_settings : pas d'écriture DB, run_in_threadpool sur fetch, CgmError → 400 avec detail. Isolation testée (status inchangé après appel).",
+    "notifications.ts L11 : notificationsSupported = Platform.OS !== 'web' && !isExpoGoAndroid ; l'import est paresseux via require() dans mod L25. Le fix crash Expo Go Android est bien en place — pas d'import top-level de 'expo-notifications'. Sur web, la carte reminders-web-info s'affiche et la sauvegarde skip la programmation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration7.py (nouveau — 10 tests, tous passent)",
+    "/app/test_reports/pytest/iteration7.xml (nouveau — JUnit)",
+    "/app/test_reports/browser/iter7_*.jpeg (screenshots preview)"
+  ],
+  "success_rate": {"backend": "100% (10/10 iteration 7)", "frontend": "100% (import, partage alertes hypo, cgm test, rappels web)"},
+  "seed_data_creation": "Réutilise conftest.py (Alice/Bob/tokens). Test LibreView : nettoie glucose_readings source=libre + insulin_doses note=Import LibreView + meals name=Repas (import LibreView) pour user_testalice avant chaque test. Test alerts : crée un share Papa avec delivered@resend.dev (1 e-mail réel envoyé au domaine test de Resend), révocation et nettoyage des glycémies < 70 en fin de test. Test CGM : 2 appels réels Abbott (identifiants factices, status 2 attendu). Nettoyage après tests frontend : shares Tante/Papa révoqués, glucose <70 pour user_devtest supprimé (1 doc).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Itération 7 fully green : backend 10/10 (import LibreView FR/EN/mmol + dédoublonnage + auth + limites, alertes hypo Papa->delivered@resend.dev cooldown 1h + mesure ancienne ignorée + patch cross-user 404, cgm/test Libre bad creds -> 400 'Abbott refuse ces identifiants'). Frontend web : import-libreview et /profil OK, /partage alerte hypo lifecycle complet OK, /cgm test button + guide OK, /rappels charge sans erreur sur web (import paresseux d'expo-notifications). Bugs résiduels : deprecation warnings shadow*/pointerEvents et GO_BACK sur rappels — non bloquants. Aucun retest requis. Lancer test_iteration7.py avec `pytest -o addopts= test_iteration7.py` (xdist désactivé)."
+}
