@@ -1,50 +1,25 @@
-// Utilise la variable d'environnement Expo si elle existe, sinon pointe vers le backend local FastAPI[cite: 10]
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8002";
-const API_URL = `${API_BASE_URL}/api/analyser_repas`;
+import React, { useState } from 'react';
+import { synchroniserCapteurCGM } from './api';
 
-async function lireJsonSecurise(response) {
-  const texte = await response.text();
+// À insérer dans ton composant (ex. Dashboard / Accueil)
+const [loadingSync, setLoadingSync] = useState(false);
+
+const handleSync = async () => {
+  setLoadingSync(true);
   try {
-    return JSON.parse(texte);
-  } catch {
-    // Le corps n'est pas du JSON valide (page d'erreur, réponse vide, timeout de proxy...).
-    // On ne plante plus ici : on renvoie null et l'appelant décide du message à afficher.
-    return null;
+    const data = await synchroniserCapteurCGM();
+    
+    // Notification de succès avec le nombre de mesures
+    alert(`Synchronisation réussie ! ${data?.inserted || 0} nouvelle(s) mesure(s) importée(s).`);
+
+    // Rafraîchit l'affichage des graphiques et données du tableau de bord
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
+  } catch (err) {
+    alert(`Échec : ${err.message}`);
+    console.error("Erreur synchronisation CGM :", err);
+  } finally {
+    setLoadingSync(false);
   }
-}
-
-export async function analyserRepasMobile(imageUri, ratioGlucides = 10.0) {
-  const formData = new FormData();
-
-  const filename = imageUri.split('/').pop();
-  const match = /\.(\w+)$/.exec(filename);
-  const type = match ? `image/${match[1]}` : `image/jpeg`;
-
-  formData.append('file', {
-    uri: imageUri,
-    name: filename,
-    type: type,
-  });
-
-  const response = await fetch(`${API_URL}?ratio_glucides=${ratioGlucides}`, {
-    method: 'POST',
-    body: formData,
-    headers: {
-      'Accept': 'application/json',
-      // Pas de Content-Type ici : fetch le fixe lui-même avec le boundary correct
-      // pour un FormData. Le fixer à la main casse l'envoi du fichier.
-    },
-  });
-
-  const data = await lireJsonSecurise(response);
-
-  if (!response.ok) {
-    throw new Error(data?.detail || `Erreur lors de l'analyse (code ${response.status})`);
-  }
-
-  if (!data) {
-    throw new Error("Réponse invalide du serveur d'analyse.");
-  }
-
-  return data;
-}
+};

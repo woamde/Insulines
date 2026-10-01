@@ -7,7 +7,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests
-from tracking import notify_hypo_if_needed
+try:
+    from tracking import notify_hypo_if_needed
+except ImportError:
+    async def notify_hypo_if_needed(*args, **kwargs):
+        pass
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
@@ -22,7 +27,6 @@ DEXCOM_BASES = {
     "ous": "https://shareous1.dexcom.com/ShareWebServices/Services",
     "jp": "https://share.dexcom.com/ShareWebServices/Services",
 }
-# Identifiant d'application utilisé par les clients Dexcom Share publics (xDrip, Nightscout bridge).
 DEXCOM_APPLICATION_ID = os.environ.get("DEXCOM_APPLICATION_ID", "d89459d6-77cc-4f6d-b2a6-4a8b1a0a3f26")
 
 LIBRE_HOSTS = {
@@ -46,6 +50,13 @@ SOURCE_LABELS = {"dexcom": "Dexcom", "libre": "FreeStyle Libre", "nightscout": "
 
 class CgmError(Exception):
     """Erreur fonctionnelle attendue (identifiants, compte, réseau)."""
+
+
+def _get_user_id(user: dict) -> str:
+    """Extrait de façon sécurisée l'identifiant utilisateur sous forme de chaîne."""
+    if not isinstance(user, dict):
+        return str(user)
+    return str(user.get("user_id") or user.get("_id") or user.get("id") or "")
 
 
 def _quoted(text: str):
@@ -120,19 +131,17 @@ def fetch_dexcom(settings: dict) -> list[dict]:
 
 
 def _libre_parse_ts(item: dict) -> Optional[datetime]:
-    """Analyse et normalise l'horodatage LibreLinkUp en UTC strict pour éviter tout décalage."""
+    """Analyse et normalise l'horodatage LibreLinkUp en UTC strict."""
     for key in ("FactoryTimestamp", "Timestamp"):
         val = item.get(key)
         if not val:
             continue
         val_str = str(val).strip()
-        # Tentative de parsing du format standard Abbott ("M/D/YYYY h:mm:ss AM/PM")
         try:
             dt = datetime.strptime(val_str, "%m/%d/%Y %I:%M:%S %p")
             return dt.replace(tzinfo=timezone.utc)
         except ValueError:
             pass
-        # Tentative de parsing ISO 8601 au cas où l'API renvoie un format normalisé
         try:
             dt = datetime.fromisoformat(val_str.replace("Z", "+00:00"))
             if dt.tzinfo is None:
@@ -158,7 +167,6 @@ LIBRE_STATUS_MESSAGES = {
     429: "Trop de tentatives de connexion LibreLinkUp : patientez quelques minutes avant de réessayer",
     430: "Trop de tentatives de connexion LibreLinkUp : patientez quelques minutes avant de réessayer",
 }
-# Statuts applicatifs renvoyés par Abbott pour un compte non finalisé (email non vérifié, âge, etc.)
 LIBRE_ACCOUNT_STEPS = {
     "tou": "Ouvrez l'application LibreLinkUp, acceptez les nouvelles conditions d'utilisation, puis réessayez",
     "pp": "Ouvrez l'application LibreLinkUp, acceptez la politique de confidentialité, puis réessayez",
@@ -180,7 +188,6 @@ def _libre_headers(version: str) -> dict:
 
 
 def _libre_json(r: requests.Response) -> dict:
-    """Décode la réponse Abbott ; une page HTML (Cloudflare) n'est pas une réponse applicative."""
     ctype = (r.headers.get("Content-Type") or "").lower()
     if "json" not in ctype:
         logger.warning("LibreLinkUp non-JSON response: http=%s ctype=%s", r.status_code, ctype)
@@ -192,7 +199,6 @@ def _libre_json(r: requests.Response) -> dict:
 
 
 def _libre_login(session: requests.Session, base: str, email: str, password: str, version: str, _depth: int = 0):
-    """Login LibreLinkUp : région, CGU, version minimale, statuts d'erreur applicatifs."""
     r = session.post(
         f"{base}/llu/auth/login",
         json={"email": email, "password": password},
@@ -310,7 +316,6 @@ def fetch_libre(settings: dict) -> list[dict]:
             for c in connections if c.get("patientId")
         ]
         settings["_libre_selected_patient"] = patient_id
-        logger.info("LibreLinkUp connections=%s using patient=%s", len(connections), patient_id)
 
         r = session.get(f"{base}/llu/connections/{patient_id}/graph", headers=auth_headers, timeout=25)
         body = _libre_json(r)
@@ -402,7 +407,8 @@ def register_cgm(api_router: APIRouter, db, get_current_user) -> None:
 
     @api_router.get("/cgm/status")
     async def cgm_status(user: dict = Depends(get_current_user)):
-        doc = await _status_doc(user["user_id"])
+        uid = _get_user_id(user)
+        doc = await _status_doc(uid)
         if not doc:
             return {"configured": False}
         last_sync = doc.get("last_sync_at")
@@ -420,7 +426,7 @@ def register_cgm(api_router: APIRouter, db, get_current_user) -> None:
     async def save_cgm_settings(payload: CgmSettingsIn, user: dict = Depends(get_current_user)):
         if payload.source not in FETCHERS:
             raise HTTPException(status_code=400, detail="Source non supportée")
-        uid = user["user_id"]
+        uid = _get_user_id(user)
         now = datetime.now(timezone.utc)
         doc = await db.cgm_settings.find_one({"user_id": uid})
         update = {
@@ -447,16 +453,17 @@ def register_cgm(api_router: APIRouter, db, get_current_user) -> None:
 
     @api_router.delete("/cgm/settings")
     async def disconnect_cgm(user: dict = Depends(get_current_user)):
+        uid = _get_user_id(user)
         await db.cgm_settings.update_one(
-            {"user_id": user["user_id"]}, {"$set": {"deleted_at": datetime.now(timezone.utc)}}
+            {"user_id": uid}, {"$set": {"deleted_at": datetime.now(timezone.utc)}}
         )
         return {"ok": True}
 
     @api_router.post("/cgm/test")
     async def test_cgm_settings(payload: CgmSettingsIn, user: dict = Depends(get_current_user)):
-        """Teste des identifiants sans rien enregistrer : renvoie le verdict du fournisseur."""
         if payload.source not in FETCHERS:
             raise HTTPException(status_code=400, detail="Source CGM inconnue")
+        uid = _get_user_id(user)
         settings = {
             "source": payload.source,
             "region": payload.region or "global",
@@ -466,7 +473,7 @@ def register_cgm(api_router: APIRouter, db, get_current_user) -> None:
             "token": (payload.token or "").strip(),
             "patient_id": payload.patient_id or "",
         }
-        logger.info("Test CGM %s (région %s) pour %s", payload.source, settings["region"], user["user_id"])
+        logger.info("Test CGM %s (région %s) pour %s", payload.source, settings["region"], uid)
         try:
             readings = await run_in_threadpool(FETCHERS[payload.source], settings)
         except CgmError as e:
@@ -486,7 +493,7 @@ def register_cgm(api_router: APIRouter, db, get_current_user) -> None:
 
     @api_router.post("/cgm/sync")
     async def sync_cgm(user: dict = Depends(get_current_user)):
-        uid = user["user_id"]
+        uid = _get_user_id(user)
         doc = await _status_doc(uid)
         if not doc:
             raise HTTPException(status_code=400, detail="Aucun capteur configuré")
@@ -509,9 +516,13 @@ def register_cgm(api_router: APIRouter, db, get_current_user) -> None:
         readings.sort(key=lambda r: r["ts"])
 
         external_ids = [f"{uid}:{doc['source']}:{int(r['ts'].timestamp())}" for r in readings]
-        existing = await db.glucose_readings.find(
-            {"user_id": uid, "external_id": {"$in": external_ids}}, {"external_id": 1}
-        ).to_list(len(external_ids) or 1)
+        
+        existing = []
+        if external_ids:
+            cursor = db.glucose_readings.find(
+                {"user_id": uid, "external_id": {"$in": external_ids}}, {"external_id": 1}
+            )
+            existing = await cursor.to_list(length=len(external_ids))
         existing_set = {e["external_id"] for e in existing}
 
         new_docs = []
@@ -539,7 +550,10 @@ def register_cgm(api_router: APIRouter, db, get_current_user) -> None:
             result = await db.glucose_readings.insert_many(new_docs)
             inserted = len(result.inserted_ids)
             latest_new = new_docs[-1]
-            await notify_hypo_if_needed(db, uid, latest_new["value_mgdl"], latest_new["measured_at"])
+            try:
+                await notify_hypo_if_needed(db, uid, latest_new["value_mgdl"], latest_new["measured_at"])
+            except Exception as ex:
+                logger.warning("Échec notification hypo : %s", ex)
 
         await db.cgm_settings.update_one(
             {"_id": doc["_id"]},

@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
+import { 
+  StyleSheet, 
+  Text, 
+  View, 
+  ScrollView, 
+  ActivityIndicator, 
+  RefreshControl, 
+  TouchableOpacity, 
+  Alert, 
+  Platform 
+} from 'react-native';
 
 const getApiUrl = () => {
   if (process.env.EXPO_PUBLIC_API_URL) {
@@ -17,6 +27,7 @@ export default function DashboardScreen() {
   const [latestReadings, setLatestReadings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function fetchData() {
@@ -34,7 +45,7 @@ export default function DashboardScreen() {
 
       const fetchOptions: RequestInit = { headers, mode: 'cors' };
 
-      // Execution parallele sans blocage global
+      // Exécution parallèle sans blocage global
       const [profileRes, statsRes, glucoseRes] = await Promise.allSettled([
         fetch(`${apiUrl}/api/profile`, fetchOptions),
         fetch(`${apiUrl}/api/stats?days=7`, fetchOptions),
@@ -70,6 +81,42 @@ export default function DashboardScreen() {
     }
   }
 
+  // Lancement de la synchronisation capteur + rafraîchissement d'état
+  const handleSync = async () => {
+    const apiUrl = getApiUrl();
+    setSyncing(true);
+    try {
+      const token = typeof window !== 'undefined' 
+        ? localStorage.getItem('token') || localStorage.getItem('session_token') 
+        : '';
+
+      const res = await fetch(`${apiUrl}/api/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
+      });
+
+      if (res.ok) {
+        // Rechargement immédiat de l'écran avec les nouvelles données capteur
+        await fetchData();
+
+        const msg = 'Données du capteur actualisées avec succès.';
+        if (Platform.OS === 'web') window.alert(`Synchronisation\n${msg}`);
+        else Alert.alert('Synchronisation', msg);
+      } else {
+        throw new Error(`Code statut : ${res.status}`);
+      }
+    } catch (err: any) {
+      const errMsg = "Échec de la synchronisation avec le capteur.";
+      if (Platform.OS === 'web') window.alert(`Erreur\n${errMsg}`);
+      else Alert.alert('Erreur', errMsg);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -93,9 +140,24 @@ export default function DashboardScreen() {
       contentContainerStyle={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      <View style={styles.header}>
-        <Text style={styles.title}>Bonjour, {profile?.first_name || 'Patient'}</Text>
-        <Text style={styles.subtitle}>Suivi glycémique et insuline</Text>
+      {/* En-tête avec Bouton de Synchronisation */}
+      <View style={styles.headerContainer}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Bonjour, {profile?.first_name || 'Patient'}</Text>
+          <Text style={styles.subtitle}>Suivi glycémique et insuline</Text>
+        </View>
+
+        <TouchableOpacity 
+          style={[styles.syncButton, syncing && styles.syncButtonDisabled]} 
+          onPress={handleSync}
+          disabled={syncing}
+        >
+          {syncing ? (
+            <ActivityIndicator size="small" color="#ffffff" />
+          ) : (
+            <Text style={styles.syncButtonText}>Synchroniser</Text>
+          )}
+        </TouchableOpacity>
       </View>
 
       {error && (
@@ -151,9 +213,13 @@ const styles = StyleSheet.create({
   container: { padding: 20, backgroundColor: '#f8f9fa', flexGrow: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
   loadingText: { marginTop: 10, color: '#666', fontSize: 16 },
-  header: { marginBottom: 20 },
+  headerContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
+  header: { flex: 1 },
   title: { fontSize: 26, fontWeight: 'bold', color: '#333' },
   subtitle: { fontSize: 14, color: '#666', marginTop: 4 },
+  syncButton: { backgroundColor: '#007AFF', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, marginLeft: 10 },
+  syncButtonDisabled: { backgroundColor: '#99c2ff' },
+  syncButtonText: { color: '#ffffff', fontWeight: '600', fontSize: 13 },
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 20, elevation: 3 },
   cardTitle: { fontSize: 16, fontWeight: '600', marginBottom: 12, color: '#333' },
   statsRow: { flexDirection: 'row', justifyContent: 'space-around' },

@@ -3,6 +3,9 @@ import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, Platform, A
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
+// URL backend FastAPI pointant correctement sur le port 8002
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8002';
+
 export default function ProfilScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -23,12 +26,18 @@ export default function ProfilScreen() {
     }
   };
 
-  // Charger les données du profil de manière sécurisée
+  // Charger les données du profil depuis le backend (port 8002)
   useEffect(() => {
     const fetchProfile = async () => {
+      setLoading(true);
       try {
-        const baseUrl = Platform.OS === 'web' ? '' : 'http://localhost:8000';
-        const res = await fetch(`${baseUrl}/api/profile`);
+        const res = await fetch(`${API_BASE_URL}/api/profile`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+        });
 
         if (!res.ok) {
           throw new Error(`Erreur HTTP : status ${res.status}`);
@@ -46,7 +55,7 @@ export default function ProfilScreen() {
           target_max: data.target_max?.toString() || '180',
           diabetes_type: data.diabetes_type || 'type1'
         });
-      } catch (e) {
+      } catch (e: any) {
         console.error("Erreur de chargement du profil :", e);
         showNotification('Erreur', 'Impossible de charger le profil depuis le serveur.');
       } finally {
@@ -57,18 +66,23 @@ export default function ProfilScreen() {
     fetchProfile();
   }, []);
 
-  // Enregistrer les modifications
+  // Enregistrer les modifications sur l'API
   const handleSave = async () => {
     setSaving(true);
     try {
-      const baseUrl = Platform.OS === 'web' ? '' : 'http://localhost:8000';
-      const res = await fetch(`${baseUrl}/api/profile`, {
+      const minVal = parseFloat(profile.target_min);
+      const maxVal = parseFloat(profile.target_max);
+
+      const res = await fetch(`${API_BASE_URL}/api/profile`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Accept': 'application/json',
+          'Content-Type': 'application/json' 
+        },
         body: JSON.stringify({
           first_name: profile.first_name,
-          target_min: parseFloat(profile.target_min),
-          target_max: parseFloat(profile.target_max),
+          target_min: isNaN(minVal) ? 70 : minVal,
+          target_max: isNaN(maxVal) ? 180 : maxVal,
           diabetes_type: profile.diabetes_type
         })
       });
@@ -78,7 +92,7 @@ export default function ProfilScreen() {
       }
 
       showNotification('Succès', 'Votre profil a été mis à jour.');
-    } catch (e) {
+    } catch (e: any) {
       console.error("Erreur de sauvegarde du profil :", e);
       showNotification('Erreur', 'Échec de la sauvegarde du profil.');
     } finally {
