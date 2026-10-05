@@ -140,6 +140,20 @@ export default function AjouterInsulineScreen() {
       <TouchableOpacity style={styles.saveButton} onPress={handleSaveSimultaneous}>
         <Text style={styles.saveButtonText}>Enregistrer tout dans le journal</Text>
       </TouchableOpacity>
+
+      {/* Ajout du bouton Annuler / Retour */}
+      <TouchableOpacity 
+        style={styles.cancelButton} 
+        onPress={() => {
+          if (router.canGoBack()) {
+            router.back();
+          } else {
+            router.push('/');
+          }
+        }}
+      >
+        <Text style={styles.cancelButtonText}>Annuler</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -164,4 +178,13 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   saveButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  // Nouveaux styles pour le bouton annuler
+  cancelButton: {
+    backgroundColor: '#e2e8f0', // Gris clair
+    borderRadius: 10,
+    padding: 15,
+    alignItems: 'center',
+    marginTop: 12, // Espace entre le bouton bleu et celui-ci
+  },
+  cancelButtonText: { color: '#475569', fontSize: 16, fontWeight: '600' },
 });

@@ -71,13 +71,36 @@ export default function HomeScreen() {
     }
   };
 
-  // Fonction pour déterminer la couleur en fonction du taux de glycémie
   const getGlucoseColor = (value: number | string) => {
     const num = Number(value);
-    if (isNaN(num)) return '#1C1C1E'; // Couleur par défaut si la valeur n'est pas un nombre
-    if (num < 70) return '#EAB308';   // Jaune (Hypoglycémie) - nuance lisible sur fond blanc
-    if (num > 180) return '#EF4444';  // Rouge (Hyperglycémie)
-    return '#22C55E';                 // Vert (Dans la cible)
+    if (isNaN(num)) return '#1C1C1E'; 
+    if (num < 70) return '#EAB308';   
+    if (num > 180) return '#EF4444';  
+    return '#22C55E';                 
+  };
+
+  // Nouvelle fonction pour le thème de l'insuline
+  const getInsulinTheme = (kind?: string) => {
+    const k = (kind || 'bolus').toLowerCase();
+    
+    // Humalog / Rapide / Bolus -> Lie de vin
+    if (k.includes('humalog') || k.includes('bolus') || k.includes('rapide')) {
+      return { 
+        text: '#800020', // Code couleur classique Lie de vin / Burgundy
+        bg: '#F5E6E8'    // Fond lie de vin très clair pour le badge
+      };
+    }
+    
+    // Toujeo / Lente / Basal -> Vert pâle
+    if (k.includes('toujeo') || k.includes('basal') || k.includes('lente')) {
+      return { 
+        text: '#276749', // Vert sapin pour un texte bien lisible
+        bg: '#D1F2D3'    // Vert pâle pour le badge
+      };
+    }
+
+    // Par défaut (orange)
+    return { text: '#D97706', bg: '#FEF3C7' }; 
   };
 
   return (
@@ -124,6 +147,9 @@ export default function HomeScreen() {
       {journalEntries.length > 0 ? (
         journalEntries.slice(0, 30).map((item: any, index: number) => {
           const formattedDate = formatParisTime(item.timestamp);
+          // On génère le thème de l'insuline pour cette entrée
+          const insulinTheme = item.insulin ? getInsulinTheme(item.insulin.kind) : null;
+
           return (
             <View key={item.id || index} style={styles.measureCard}>
               <View style={styles.cardHeaderRow}>
@@ -141,7 +167,6 @@ export default function HomeScreen() {
                     <Text 
                       style={[
                         styles.measureValue, 
-                        // Application dynamique de la couleur ici
                         { color: getGlucoseColor(item.glucose.value) }
                       ]}
                     >
@@ -151,12 +176,17 @@ export default function HomeScreen() {
                   </View>
                 ) : null}
 
-                {item.insulin ? (
+                {item.insulin && insulinTheme ? (
                   <View style={styles.insulinSection}>
-                    <Text style={styles.insulinValue}>
+                    <Text style={[styles.insulinValue, { color: insulinTheme.text }]}>
                       💉 {item.insulin.units} <Text style={styles.unit}>U</Text>
                     </Text>
-                    <Text style={styles.insulinBadge}>{item.insulin.kind || 'bolus'}</Text>
+                    <Text style={[
+                      styles.insulinBadge, 
+                      { backgroundColor: insulinTheme.bg, color: insulinTheme.text }
+                    ]}>
+                      {item.insulin.kind || 'bolus'}
+                    </Text>
                   </View>
                 ) : null}
               </View>
@@ -191,24 +221,14 @@ const styles = StyleSheet.create({
   cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   measureDate: { fontSize: 12, color: '#8E8E93' },
   noteText: { fontSize: 12, color: '#555', fontStyle: 'italic', maxWidth: '50%' },
-  
-  inlineDetails: { 
-    flexDirection: 'row', 
-    justifyContent: 'flex-start', 
-    alignItems: 'center', 
-    marginTop: 4,
-    gap: 20,
-    flexWrap: 'wrap'
-  },
-  
+  inlineDetails: { flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', marginTop: 4, gap: 20, flexWrap: 'wrap' },
   glucoseSection: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   insulinSection: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  // La couleur de measureValue par défaut est surchargée par getGlucoseColor()
   measureValue: { fontSize: 18, fontWeight: 'bold' },
-  insulinValue: { fontSize: 18, fontWeight: 'bold', color: '#D97706' },
+  insulinValue: { fontSize: 18, fontWeight: 'bold' }, // La couleur est maintenant dynamique
   unit: { fontSize: 12, fontWeight: 'normal', color: '#8E8E93' },
   badge: { backgroundColor: '#E8F2FF', color: '#007AFF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, fontSize: 12, overflow: 'hidden' },
-  insulinBadge: { backgroundColor: '#FEF3C7', color: '#D97706', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, fontSize: 12, overflow: 'hidden' },
+  insulinBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, fontSize: 12, overflow: 'hidden' }, // Les couleurs sont maintenant dynamiques
   centerBox: { marginTop: 30, alignItems: 'center' },
   emptyText: { color: '#8E8E93', fontSize: 14 },
 });
