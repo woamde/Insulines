@@ -1,11 +1,10 @@
 import { useMemo, useState } from "react";
-import { ScrollView, Text, TextInput, View } from "react-native";
+import { ScrollView, Text, TextInput, View, ActivityIndicator, TouchableOpacity } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useProfile } from "@/src/api";
-import { Card, EmptyState, LoadingState, PrimaryButton, StatTile } from "@/src/components/ui";
 import { round1 } from "@/src/glucose";
 import { unitsFor } from "@/src/units";
 import { makeStyles, useTheme } from "@/src/theme";
@@ -75,8 +74,9 @@ export default function CalculateurScreen() {
 
   if (profile.isLoading) {
     return (
-      <View style={[styles.root, { paddingTop: insets.top + 16 }]}>
-        <LoadingState label="Chargement de vos paramètres..." />
+      <View style={[styles.root, styles.centerContainer, { paddingTop: insets.top + 16 }]}>
+        <ActivityIndicator size="large" color={colors.brandPrimary} />
+        <Text style={[styles.subtitle, { marginTop: 12 }]}>Chargement de vos paramètres...</Text>
       </View>
     );
   }
@@ -84,19 +84,23 @@ export default function CalculateurScreen() {
   if (!profile.data?.ic_ratio || !profile.data?.isf) {
     return (
       <View style={[styles.root, { paddingTop: insets.top + 16, paddingHorizontal: 16 }]}>
-        <Card>
-          <EmptyState
-            icon={<Ionicons name="calculator-outline" size={48} color={colors.brandPrimary} />}
-            title="Profil incomplet"
-            message="Veuillez configurer votre ratio insuline/glucides et votre facteur de sensibilité dans votre profil pour utiliser le calculateur."
-          />
-          <View style={styles.actionSpacing}>
-            <PrimaryButton
-              label="Configurer mon profil"
-              onPress={() => router.push("/profil")}
-            />
+        <View style={styles.card}>
+          <View style={styles.emptyStateContainer}>
+            <Ionicons name="calculator-outline" size={48} color={colors.brandPrimary} />
+            <Text style={styles.emptyTitle}>Profil incomplet</Text>
+            <Text style={styles.emptyMessage}>
+              Veuillez configurer votre ratio insuline/glucides et votre facteur de sensibilité dans votre profil pour utiliser le calculateur.
+            </Text>
           </View>
-        </Card>
+          <View style={styles.actionSpacing}>
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.brandPrimary }]}
+              onPress={() => router.push("/profil")}
+            >
+              <Text style={styles.primaryButtonText}>Configurer mon profil</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
     );
   }
@@ -115,7 +119,7 @@ export default function CalculateurScreen() {
         Ratio : 1 U pour {profile.data.ic_ratio} g · Cible : {units.fmt(profile.data.target_glucose ?? 100)} {units.label}
       </Text>
 
-      <Card>
+      <View style={styles.card}>
         <Text style={styles.inputLabel}>Glucides du repas (g)</Text>
         <TextInput
           style={styles.textInput}
@@ -137,11 +141,11 @@ export default function CalculateurScreen() {
             placeholderTextColor={colors.muted}
           />
         </View>
-      </Card>
+      </View>
 
       {bolusResult && (
         <View style={styles.resultContainer}>
-          <Card>
+          <View style={styles.card}>
             <Text style={styles.resultTitle}>Suggestion de Dose</Text>
             <View style={styles.totalRow}>
               <Text style={styles.totalValue}>{round1(bolusResult.total)}</Text>
@@ -149,18 +153,18 @@ export default function CalculateurScreen() {
             </View>
 
             <View style={styles.tilesRow}>
-              <StatTile
-                label="Repas"
-                value={`${round1(bolusResult.carbsDose)}`}
-                unit="U"
-                color={colors.brandPrimary}
-              />
-              <StatTile
-                label="Correction"
-                value={`${round1(bolusResult.correctionDose)}`}
-                unit="U"
-                color={bolusResult.correctionDose < 0 ? colors.warning : colors.info}
-              />
+              <View style={[styles.statTile, { backgroundColor: colors.surfaceSecondary }]}>
+                <Text style={styles.statTileLabel}>Repas</Text>
+                <Text style={[styles.statTileValue, { color: colors.brandPrimary }]}>
+                  {round1(bolusResult.carbsDose)} U
+                </Text>
+              </View>
+              <View style={[styles.statTile, { backgroundColor: colors.surfaceSecondary }]}>
+                <Text style={styles.statTileLabel}>Correction</Text>
+                <Text style={[styles.statTileValue, { color: bolusResult.correctionDose < 0 ? colors.warning : colors.info }]}>
+                  {round1(bolusResult.correctionDose)} U
+                </Text>
+              </View>
             </View>
 
             <Text style={styles.disclaimer}>
@@ -168,8 +172,8 @@ export default function CalculateurScreen() {
             </Text>
 
             <View style={styles.actionSpacing}>
-              <PrimaryButton
-                label="Enregistrer cette injection"
+              <TouchableOpacity
+                style={[styles.primaryButton, { backgroundColor: colors.brandPrimary }]}
                 onPress={() =>
                   router.push({
                     pathname: "/ajouter-insuline",
@@ -179,9 +183,11 @@ export default function CalculateurScreen() {
                     },
                   })
                 }
-              />
+              >
+                <Text style={styles.primaryButtonText}>Enregistrer cette injection</Text>
+              </TouchableOpacity>
             </View>
-          </Card>
+          </View>
         </View>
       )}
     </ScrollView>
@@ -192,6 +198,11 @@ const useStyles = makeStyles((colors) => ({
   root: {
     flex: 1,
     backgroundColor: colors.surface,
+  },
+  centerContainer: {
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
   },
   content: {
     paddingHorizontal: 16,
@@ -207,6 +218,32 @@ const useStyles = makeStyles((colors) => ({
     marginTop: 4,
     marginBottom: 16,
   },
+  card: {
+    backgroundColor: colors.surfaceSecondary || colors.surface,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    marginBottom: 16,
+  },
+  emptyStateContainer: {
+    alignItems: "center",
+    paddingVertical: 20,
+    paddingHorizontal: 10,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: colors.onSurface,
+    marginTop: 12,
+  },
+  emptyMessage: {
+    textAlign: "center",
+    color: colors.muted,
+    marginTop: 6,
+    fontSize: 14,
+    lineHeight: 20,
+  },
   inputLabel: {
     fontSize: 14,
     fontWeight: "500",
@@ -221,13 +258,13 @@ const useStyles = makeStyles((colors) => ({
     paddingHorizontal: 12,
     fontSize: 16,
     color: colors.onSurface,
-    backgroundColor: colors.surfaceSecondary,
+    backgroundColor: colors.surface,
   },
   inputSpacing: {
     marginTop: 16,
   },
   resultContainer: {
-    marginTop: 16,
+    marginTop: 8,
   },
   resultTitle: {
     fontSize: 16,
@@ -256,6 +293,21 @@ const useStyles = makeStyles((colors) => ({
     gap: 12,
     marginVertical: 12,
   },
+  statTile: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  statTileLabel: {
+    fontSize: 12,
+    color: colors.muted,
+    marginBottom: 4,
+  },
+  statTileValue: {
+    fontSize: 16,
+    fontWeight: "bold",
+  },
   disclaimer: {
     fontSize: 12,
     color: colors.muted,
@@ -264,5 +316,16 @@ const useStyles = makeStyles((colors) => ({
   },
   actionSpacing: {
     marginTop: 16,
+  },
+  primaryButton: {
+    height: 48,
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  primaryButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "600",
   },
 }));

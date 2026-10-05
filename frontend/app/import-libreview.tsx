@@ -3,13 +3,13 @@ import { Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
-import { File } from "expo-file-system";
-import Ionicons from "@react-native-vector-icons/ionicons";
+import * as FileSystem from "expo-file-system";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { makeStyles, useTheme } from "@/src/theme";
-import { importLibreviewBatch, type ImportResult } from "@/src/api";
-import { Card, PrimaryButton } from "@/src/components/ui";
+import { importLibreviewBatch, type ImportResult } from "../src/api";
+import { Card, Button } from "../src/components/ui";
 import { useToast } from "@/src/components/Toast";
 
 const BATCH_LINES = 4000;
@@ -26,7 +26,9 @@ async function readFileText(asset: DocumentPicker.DocumentPickerAsset): Promise<
     const res = await fetch(asset.uri);
     return res.text();
   }
-  return new File(asset.uri).text();
+  return await FileSystem.readAsStringAsync(asset.uri, {
+    encoding: FileSystem.EncodingType.UTF8,
+  });
 }
 
 /** Découpe le CSV en lots, en répétant les lignes d'en-tête (avant la ligne « Type d'enregistrement ») dans chaque lot. */
@@ -55,7 +57,11 @@ export default function ImportLibreview() {
   const [result, setResult] = useState<ImportResult | null>(null);
 
   const pickAndImport = async () => {
-    const picked = await DocumentPicker.getDocumentAsync({ type: ["text/csv", "text/comma-separated-values", "text/plain", "*/*"], copyToCacheDirectory: true, multiple: false });
+    const picked = await DocumentPicker.getDocumentAsync({
+      type: ["text/csv", "text/comma-separated-values", "text/plain", "*/*"],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
     if (picked.canceled || !picked.assets?.[0]) return;
     const asset = picked.assets[0];
     setBusy(true);
@@ -65,7 +71,13 @@ export default function ImportLibreview() {
       const text = await readFileText(asset);
       const batches = splitBatches(text);
       setProgress({ done: 0, total: batches.length });
-      const total: ImportResult = { readings_parsed: 0, readings_inserted: 0, insulin_inserted: 0, meals_inserted: 0, skipped: 0 };
+      const total: ImportResult = {
+        readings_parsed: 0,
+        readings_inserted: 0,
+        insulin_inserted: 0,
+        meals_inserted: 0,
+        skipped: 0,
+      };
       for (let i = 0; i < batches.length; i += 1) {
         const r = await importLibreviewBatch(batches[i], i);
         total.readings_parsed += r.readings_parsed;
@@ -77,7 +89,12 @@ export default function ImportLibreview() {
       }
       setResult(total);
       qc.invalidateQueries();
-      toast.show(total.readings_inserted > 0 ? `${total.readings_inserted} glycémies importées` : "Aucune nouvelle donnée (déjà importées)", "success");
+      toast.show(
+        total.readings_inserted > 0
+          ? `${total.readings_inserted} glycémies importées`
+          : "Aucune nouvelle donnée (déjà importées)",
+        "success"
+      );
     } catch (e) {
       toast.show(e instanceof Error ? e.message : "Import impossible", "error");
     } finally {
@@ -88,13 +105,21 @@ export default function ImportLibreview() {
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Pressable onPress={() => router.back()} style={styles.backButton} testID="import-back-button" accessibilityRole="button">
+        <Pressable
+          onPress={() => router.back()}
+          style={styles.backButton}
+          testID="import-back-button"
+          accessibilityRole="button"
+        >
           <Ionicons name="chevron-back" size={24} color={colors.onSurface} />
         </Pressable>
         <Text style={styles.title}>Importer LibreView</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
+        showsVerticalScrollIndicator={false}
+      >
         <Card testID="import-steps-card">
           <Text style={styles.cardTitle}>Récupérer votre historique en 3 étapes</Text>
           {STEPS.map((step, i) => (
@@ -105,14 +130,19 @@ export default function ImportLibreview() {
               <Text style={styles.stepText}>{step}</Text>
             </View>
           ))}
-          <Text style={styles.hint}>Formats acceptés : export LibreView en français ou en anglais, en mg/dL ou mmol/L. Les données déjà présentes ne sont pas dupliquées.</Text>
+          <Text style={styles.hint}>
+            Formats acceptés : export LibreView en français ou en anglais, en mg/dL ou mmol/L. Les données déjà présentes ne sont pas dupliquées.
+          </Text>
         </Card>
 
-        <PrimaryButton
-          label={busy && progress ? `Import en cours… ${progress.done}/${progress.total}` : "Choisir le fichier glucose_data.csv"}
+        <Button
+          title={
+            busy && progress
+              ? `Import en cours… ${progress.done}/${progress.total}`
+              : "Choisir le fichier glucose_data.csv"
+          }
           onPress={pickAndImport}
-          loading={busy}
-          icon={<Ionicons name="document-attach-outline" size={18} color={colors.onBrandPrimary} />}
+          disabled={busy}
           testID="import-pick-button"
         />
 
@@ -135,7 +165,12 @@ export default function ImportLibreview() {
                 </Text>
               </View>
             ))}
-            <PrimaryButton label="Voir mes statistiques" onPress={() => router.replace("/(tabs)/stats")} variant="secondary" testID="import-go-stats" />
+            <Button
+              title="Voir mes statistiques"
+              onPress={() => router.replace("/(tabs)/stats")}
+              type="secondary"
+              testID="import-go-stats"
+            />
           </Card>
         ) : null}
       </ScrollView>

@@ -9,7 +9,9 @@ import {
   Alert,
 } from 'react-native';
 
-// Profil temporaire (à brancher sur ton API FastAPI / profil utilisateur)
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8002";
+
+// Profil temporaire (à brancher sur votre API FastAPI / profil utilisateur)
 const USER_PROFILE = {
   targetGlycemia: 100, // Glycémie cible (mg/dL)
   isf: 40,             // Facteur de sensibilité (1U baissent la glycémie de 40 mg/dL)
@@ -49,8 +51,72 @@ export default function BolusCalculatorScreen() {
   };
 
   const handleSave = async () => {
-    // Appel API POST vers FastAPI
-    Alert.alert('Succès', `Mesure de ${glycemia} mg/dL enregistrée.`);
+    const g = parseFloat(glycemia);
+    const c = parseFloat(carbs) || 0;
+
+    if (isNaN(g) && (calculatedBolus === null || calculatedBolus <= 0)) {
+      Alert.alert('Erreur', 'Rien à enregistrer ou valeurs invalides.');
+      return;
+    }
+
+    try {
+      const token = typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('session_token')) : '';
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      // Horodatage unique et partagé pour lier parfaitement la glycémie et l'insuline dans le journal
+      const exactTimestamp = new Date().toISOString();
+
+      // 1. Enregistrement de la glycémie si renseignée
+      if (!isNaN(g)) {
+        const resGluc = await fetch(`${API_URL}/api/glucose`, {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify({
+            value_mgdl: g,
+            source: 'manuel',
+            measured_at: exactTimestamp,
+            note: `Repas : ${c}g de glucides (${context})`
+          })
+        });
+
+        if (!resGluc.ok) {
+          const errorText = await resGluc.text();
+          throw new Error(`Erreur glycémie (${resGluc.status}): ${errorText}`);
+        }
+      }
+
+      // 2. Enregistrement du bolus d'insuline associé si calculé
+      if (calculatedBolus !== null && calculatedBolus > 0) {
+        const resIns = await fetch(`${API_URL}/api/insulin`, {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify({
+            units: calculatedBolus,
+            kind: 'bolus',
+            insulin_name: 'humalog',
+            injected_at: exactTimestamp,
+            note: `Bolus calculé (Cible: ${USER_PROFILE.targetGlycemia}, ICR: ${USER_PROFILE.icr})`
+          })
+        });
+
+        if (!resIns.ok) {
+          const errorText = await resIns.text();
+          throw new Error(`Erreur insuline (${resIns.status}): ${errorText}`);
+        }
+      }
+
+      Alert.alert('Succès', 'Glycémie et bolus enregistrés et liés avec succès !');
+    } catch (err: any) {
+      console.error("Erreur lors de la sauvegarde :", err);
+      Alert.alert('Erreur', err?.message || "Impossible d'enregistrer les données.");
+    }
   };
 
   return (

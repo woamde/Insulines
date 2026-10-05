@@ -1,452 +1,281 @@
-import { useEffect, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
-import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import Ionicons from "@react-native-vector-icons/ionicons";
+import React, { useState } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TextInput,
+  Pressable,
+  ActivityIndicator,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
-import { makeStyles, useTheme } from "@/src/theme";
-import { useCgmStatus, useCgmSync, useDisconnectCgm, useSaveCgmSettings, useTestCgmSettings } from "@/src/api";
-import { relTime } from "@/src/glucose";
-import { Card, Chip, ChipRow, PrimaryButton, TextField } from "@/src/components/ui";
-import { useToast } from "@/src/components/Toast";
+// Utilisation de 127.0.0.1 au lieu de localhost pour éviter les problèmes de résolution DNS réseau
+const API_BASE_URL = 'http://127.0.0.1:8000/api';
 
-type IonName = React.ComponentProps<typeof Ionicons>["name"];
+export default function CgmScreen() {
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-const SOURCES: {
-  key: "dexcom" | "libre" | "nightscout";
-  label: string;
-  description: string;
-  icon: IonName;
-  regions: { key: string; label: string }[];
-  usernameLabel: string;
-  help: string;
-}[] = [
-  {
-    key: "dexcom",
-    label: "Dexcom",
-    description: "G6 · G7 · One — via le partage Dexcom",
-    icon: "bluetooth",
-    regions: [
-      { key: "us", label: "États-Unis" },
-      { key: "ous", label: "International" },
-    ],
-    usernameLabel: "Identifiant Dexcom",
-    help: "Connectez-vous avec le compte utilisé dans l'application Dexcom (le partage Dexcom doit être activé).",
-  },
-  {
-    key: "libre",
-    label: "FreeStyle Libre",
-    description: "Libre 2 · 3 — via LibreLinkUp",
-    icon: "pulse",
-    regions: [
-      { key: "eu", label: "Europe" },
-      { key: "fr", label: "France" },
-      { key: "us", label: "États-Unis" },
-      { key: "global", label: "Autre" },
-    ],
-    usernameLabel: "E-mail LibreLinkUp",
-    help: "Créez un compte LibreLinkUp, puis partagez vos mesures depuis l'app LibreLink vers ce compte (Inviter un proche).",
-  },
-  {
-    key: "nightscout",
-    label: "Nightscout",
-    description: "Votre site Nightscout personnel",
-    icon: "globe",
-    regions: [],
-    usernameLabel: "",
-    help: "Renseignez l'URL de votre site Nightscout (ex : https://mon-site.example) et, si besoin, un token en lecture seule.",
-  },
-];
-
-export default function Cgm() {
-  const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
-  const styles = useStyles();
-  const toast = useToast();
-
-  const status = useCgmStatus();
-  const sync = useCgmSync();
-  const save = useSaveCgmSettings();
-  const disconnect = useDisconnectCgm();
-
-  const [editing, setEditing] = useState(false);
-  const [source, setSource] = useState<"dexcom" | "libre" | "nightscout">("dexcom");
-  const [region, setRegion] = useState("us");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [nsUrl, setNsUrl] = useState("");
-  const [token, setToken] = useState("");
-
-  useEffect(() => {
-    if (status.data?.configured && status.data.source) {
-      setSource(status.data.source as "dexcom" | "libre" | "nightscout");
-      if (status.data.region) setRegion(status.data.region);
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
     }
-  }, [status.data?.configured, status.data?.source, status.data?.region]);
-
-  const current = SOURCES.find((s) => s.key === source)!;
-  const configured = status.data?.configured === true;
-  const showForm = !configured || editing;
-
-  const handleSync = () => {
-    sync.mutate(undefined, {
-      onSuccess: (d) => toast.show(`${d.inserted} mesure${d.inserted > 1 ? "s" : ""} récupérée${d.inserted > 1 ? "s" : ""}`, "success"),
-      onError: (e) => toast.show(e.message, "error"),
-    });
   };
 
-  const test = useTestCgmSettings();
-  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [patients, setPatients] = useState<{ id: string; name: string }[]>([]);
-  const [patientId, setPatientId] = useState("");
-
-  const payload = () => ({ source, region, username: username.trim(), password, nightscout_url: nsUrl.trim(), token: token.trim(), patient_id: patientId });
-
-  const testCredentials = () => {
-    if (source !== "nightscout" && (!username.trim() || !password)) {
-      toast.show("Renseignez vos identifiants", "error");
+  const handleTest = async () => {
+    if (!email || !password) {
+      setMessage({ text: 'Veuillez saisir votre email et mot de passe.', type: 'error' });
       return;
     }
-    setTestResult(null);
-    test.mutate(payload(), {
-      onSuccess: (d) => {
-        setTestResult({ ok: true, message: d.message });
-        setPatients(d.patients ?? []);
-        if (!patientId && d.selected_patient) setPatientId(d.selected_patient);
-      },
-      onError: (e) => setTestResult({ ok: false, message: e.message }),
-    });
-  };
-
-  const connect = () => {
-    if (source !== "nightscout" && (!username.trim() || !password.trim())) {
-      toast.show("Renseignez vos identifiants", "error");
-      return;
-    }
-    if (source === "nightscout" && !nsUrl.trim()) {
-      toast.show("Renseignez l'URL de votre site Nightscout", "error");
-      return;
-    }
-    save.mutate(
-      payload(),
-      {
-        onSuccess: () => {
-          toast.show("Capteur connecté", "success");
-          setEditing(false);
-          setPassword("");
-          handleSync();
+    
+    setTesting(true);
+    setMessage(null);
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/cgm/test`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        onError: (e) => toast.show(e.message, "error"),
-      },
-    );
+        body: JSON.stringify({ email, password }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        setMessage({ text: data.message || 'Connexion testée avec succès !', type: 'success' });
+      } else {
+        setMessage({ text: data.detail || 'Échec du test de connexion.', type: 'error' });
+      }
+    } catch (e: any) {
+      console.error("Erreur test CGM:", e);
+      setMessage({ text: 'Erreur réseau ou serveur inaccessible. Le backend est-il lancé ?', type: 'error' });
+    } finally {
+      // Garantit que le bouton arrête de charger, même en cas de crash
+      setTesting(false);
+    }
   };
 
-  const disconnectSensor = () => {
-    disconnect.mutate(undefined, {
-      onSuccess: () => toast.show("Capteur déconnecté", "success"),
-      onError: (e) => toast.show(e.message, "error"),
-    });
+  const handleSave = async () => {
+    if (!email || !password) {
+      setMessage({ text: 'Veuillez saisir votre email et mot de passe.', type: 'error' });
+      return;
+    }
+    
+    setLoading(true);
+    setMessage(null);
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/cgm/settings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password, source: 'libre', region: 'fr' }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        setMessage({ text: 'Paramètres CGM enregistrés avec succès !', type: 'success' });
+      } else {
+        setMessage({ text: data.detail || 'Erreur lors de l’enregistrement.', type: 'error' });
+      }
+    } catch (e: any) {
+      console.error("Erreur save CGM:", e);
+      setMessage({ text: 'Erreur réseau ou serveur inaccessible. Le backend est-il lancé ?', type: 'error' });
+    } finally {
+       // Garantit que le bouton arrête de charger, même en cas de crash
+      setLoading(false);
+    }
   };
 
   return (
-    <View style={styles.root}>
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Pressable onPress={() => router.back()} style={styles.backButton} testID="cgm-back-button" accessibilityRole="button">
-          <Ionicons name="chevron-back" size={24} color={colors.onSurface} />
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.container}
+    >
+      <View style={styles.header}>
+        <Pressable 
+          onPress={handleBack} 
+          style={styles.backButton}
+          testID="cgm-back-button"
+          accessibilityRole="button"
+        >
+          <Ionicons name="chevron-back" size={24} color="#333" />
         </Pressable>
-        <Text style={styles.title}>Capteur en continu</Text>
+        <Text style={styles.headerTitle}>Configuration CGM (LibreLinkUp)</Text>
       </View>
 
-      {showForm ? (
-        <KeyboardAwareScrollView
-          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <Text style={styles.sectionLabel}>Choisissez votre source</Text>
-          {SOURCES.map((s) => (
-            <Pressable
-              key={s.key}
-              style={[styles.sourceCard, source === s.key && styles.sourceCardSelected]}
-              onPress={() => {
-                setSource(s.key);
-                setRegion(s.regions[0]?.key ?? "us");
-              }}
-              testID={`cgm-source-${s.key}`}
-            >
-              <View style={styles.sourceIcon}>
-                <Ionicons name={s.icon} size={18} color={colors.onBrandTertiary} />
-              </View>
-              <View style={styles.sourceMain}>
-                <Text style={styles.sourceLabel}>{s.label}</Text>
-                <Text style={styles.sourceDesc}>{s.description}</Text>
-              </View>
-              {source === s.key ? <Ionicons name="checkmark-circle" size={22} color={colors.brandPrimary} /> : null}
-            </Pressable>
-          ))}
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <Text style={styles.subtitle}>
+          Entrez vos identifiants LibreLinkUp pour synchroniser vos données glycémiques en temps réel.
+        </Text>
 
-          <Card style={{ marginTop: 12 }}>
-            {current.regions.length > 0 ? (
-              <>
-                <Text style={styles.cardTitle}>Région du compte</Text>
-                <ChipRow>
-                  {current.regions.map((r) => (
-                    <Chip key={r.key} label={r.label} selected={region === r.key} onPress={() => setRegion(r.key)} testID={`cgm-region-${r.key}`} />
-                  ))}
-                </ChipRow>
-              </>
-            ) : null}
-            {source === "nightscout" ? (
-              <>
-                <TextField label="URL du site" value={nsUrl} onChangeText={setNsUrl} placeholder="https://mon-site.example" testID="cgm-ns-url-input" />
-                <TextField label="Token (optionnel)" value={token} onChangeText={setToken} placeholder="Token en lecture" testID="cgm-ns-token-input" />
-              </>
+        {message && (
+          <View style={[styles.alert, message.type === 'success' ? styles.alertSuccess : styles.alertError]}>
+            <Text style={styles.alertText}>{message.text}</Text>
+          </View>
+        )}
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Email / Identifiant LibreLinkUp</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="votre.email@exemple.com"
+            placeholderTextColor="#999"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            value={email}
+            onChangeText={setEmail}
+          />
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Mot de passe</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Mot de passe"
+            placeholderTextColor="#999"
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+          />
+        </View>
+
+        <View style={styles.buttonContainer}>
+          <Pressable 
+            style={[styles.button, styles.testButton, testing && styles.buttonDisabled]} 
+            onPress={handleTest}
+            disabled={testing || loading}
+          >
+            {testing ? (
+              <ActivityIndicator color="#fff" />
             ) : (
-              <>
-                <TextField label={current.usernameLabel} value={username} onChangeText={setUsername} placeholder={source === "libre" ? "vous@exemple.fr" : "identifiant"} testID="cgm-username-input" />
-                <TextField label="Mot de passe" value={password} onChangeText={setPassword} placeholder="••••••••" secure testID="cgm-password-input" />
-              </>
+              <Text style={styles.buttonText}>Tester la connexion</Text>
             )}
-            <Text style={styles.helpText}>{current.help}</Text>
-          </Card>
+          </Pressable>
 
-          {source === "libre" ? (
-            <Card style={{ marginTop: 12 }} testID="cgm-libre-guide">
-              <Text style={styles.cardTitle}>Check-list FreeStyle Libre</Text>
-              {[
-                "Installez l'application LibreLinkUp (l'app « suiveur », différente de LibreLink) et créez-y un compte.",
-                "Dans LibreLink (téléphone du patient) : Menu › Applications connectées › LibreLinkUp › Ajouter une connexion, avec l'e-mail du compte LibreLinkUp.",
-                "Acceptez l'invitation et les conditions d'utilisation dans LibreLinkUp, puis vérifiez qu'une glycémie s'y affiche.",
-                "Saisissez ici exactement l'e-mail et le mot de passe de ce compte LibreLinkUp (sans espace).",
-              ].map((step, i) => (
-                <View key={i} style={styles.stepRow}>
-                  <View style={styles.stepBadge}>
-                    <Text style={styles.stepBadgeText}>{i + 1}</Text>
-                  </View>
-                  <Text style={styles.stepText}>{step}</Text>
-                </View>
-              ))}
-            </Card>
-          ) : null}
-
-          {testResult ? (
-            <View style={[styles.resultBox, { backgroundColor: testResult.ok ? `${colors.success}1A` : `${colors.error}14` }]} testID="cgm-test-result">
-              <Ionicons name={testResult.ok ? "checkmark-circle" : "alert-circle"} size={18} color={testResult.ok ? colors.success : colors.error} />
-              <Text style={[styles.resultText, { color: testResult.ok ? colors.success : colors.error }]}>{testResult.message}</Text>
-            </View>
-          ) : null}
-
-          {patients.length > 1 ? (
-            <Card style={{ marginTop: 8 }} testID="cgm-patient-card">
-              <Text style={styles.cardTitle}>Quel patient suivre ?</Text>
-              <ChipRow>
-                {patients.map((p) => (
-                  <Chip key={p.id} label={p.name} selected={patientId === p.id} onPress={() => setPatientId(p.id)} testID={`cgm-patient-${p.id}`} />
-                ))}
-              </ChipRow>
-              <Text style={styles.helpText}>Votre compte LibreLinkUp suit plusieurs personnes : les mesures importées seront celles du patient sélectionné.</Text>
-            </Card>
-          ) : null}
-
-          <PrimaryButton label="Tester les identifiants" onPress={testCredentials} loading={test.isPending} variant="secondary" testID="cgm-test-button" icon={<Ionicons name="flash-outline" size={18} color={colors.onBrandTertiary} />} />
-          <View style={{ height: 8 }} />
-          <PrimaryButton label="Connecter" onPress={connect} loading={save.isPending} testID="cgm-connect-button" />
-          {configured ? (
-            <Pressable onPress={() => setEditing(false)} style={styles.textButton} testID="cgm-edit-cancel-button">
-              <Text style={styles.textButtonText}>Annuler</Text>
-            </Pressable>
-          ) : null}
-        </KeyboardAwareScrollView>
-      ) : (
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }} showsVerticalScrollIndicator={false}>
-          <Card testID="cgm-status-detail-card">
-            <View style={styles.statusRow}>
-              <View style={styles.sourceIcon}>
-                <Ionicons name={current.icon} size={18} color={colors.onBrandTertiary} />
-              </View>
-              <View style={styles.sourceMain}>
-                <Text style={styles.sourceLabel}>{status.data?.source_label}</Text>
-                <Text style={styles.sourceDesc}>
-                  {status.data?.last_sync_at ? `Dernière synchro ${relTime(status.data.last_sync_at)}` : "Jamais synchronisé"}
-                </Text>
-              </View>
-            </View>
-            {status.data?.last_error ? (
-              <View style={styles.errorBox} testID="cgm-last-error">
-                <Ionicons name="alert-circle" size={18} color={colors.error} />
-                <Text style={styles.errorText}>{status.data.last_error}</Text>
-              </View>
-            ) : null}
-            <PrimaryButton label="Synchroniser maintenant" onPress={handleSync} loading={sync.isPending} testID="cgm-sync-now-button" />
-            <Pressable onPress={() => setEditing(true)} style={styles.textButton} testID="cgm-edit-button">
-              <Text style={styles.textButtonText}>Modifier les identifiants</Text>
-            </Pressable>
-            <Pressable onPress={disconnectSensor} style={styles.textButton} testID="cgm-disconnect-button">
-              <Text style={[styles.textButtonText, { color: colors.error }]}>Déconnecter le capteur</Text>
-            </Pressable>
-          </Card>
-
-          <Card style={{ marginTop: 12 }}>
-            <Text style={styles.cardTitle}>Bon à savoir</Text>
-            <Text style={styles.helpText}>
-              Les données du capteur peuvent être retardées de quelques minutes et ne remplacent pas une piqûre au doigt :
-              confirmez toujours avec une mesure capillaire avant une décision d&apos;insuline.
-            </Text>
-          </Card>
-        </ScrollView>
-      )}
-    </View>
+          <Pressable 
+            style={[styles.button, styles.saveButton, loading && styles.buttonDisabled]} 
+            onPress={handleSave}
+            disabled={loading || testing}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Enregistrer</Text>
+            )}
+          </Pressable>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
-const useStyles = makeStyles((colors) => ({
-  root: {
+const styles = StyleSheet.create({
+  container: {
     flex: 1,
-    backgroundColor: colors.surface,
-  },
-  stepRow: {
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "flex-start",
-    marginBottom: 8,
-  },
-  stepBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.brandTertiary,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 1,
-  },
-  stepBadgeText: {
-    color: colors.onBrandTertiary,
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  stepText: {
-    flex: 1,
-    color: colors.onSurfaceSecondary,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  resultBox: {
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "flex-start",
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  resultText: {
-    flex: 1,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "500",
+    backgroundColor: '#f5f6fa',
   },
   header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 50,
+    paddingBottom: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e1e8ed',
   },
   backButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
+    padding: 8,
+    marginRight: 8,
   },
-  title: {
-    color: colors.onSurface,
-    fontSize: 22,
-    fontWeight: "500",
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1da1f2',
   },
-  sectionLabel: {
-    color: colors.muted,
-    fontSize: 13,
-    marginBottom: 8,
+  scrollContent: {
+    padding: 20,
   },
-  sourceCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: colors.surfaceSecondary,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 10,
-  },
-  sourceCardSelected: {
-    borderColor: colors.brandPrimary,
-    backgroundColor: colors.brandTertiary,
-  },
-  sourceIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.surfaceSecondary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sourceMain: {
-    flex: 1,
-  },
-  sourceLabel: {
-    color: colors.onSurface,
-    fontSize: 15,
-    fontWeight: "500",
-  },
-  sourceDesc: {
-    color: colors.muted,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  cardTitle: {
-    color: colors.onSurface,
+  subtitle: {
     fontSize: 14,
-    fontWeight: "500",
-    marginBottom: 10,
+    color: '#657786',
+    marginBottom: 20,
+    lineHeight: 20,
   },
-  helpText: {
-    color: colors.muted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 10,
-  },
-  statusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
+  inputGroup: {
     marginBottom: 16,
   },
-  errorBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: `${colors.error}1A`,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
-  },
-  errorText: {
-    color: colors.error,
-    fontSize: 13,
-    flex: 1,
-    lineHeight: 18,
-  },
-  textButton: {
-    alignItems: "center",
-    paddingVertical: 12,
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  textButtonText: {
-    color: colors.onSurfaceSecondary,
+  label: {
     fontSize: 14,
-    fontWeight: "500",
+    fontWeight: '600',
+    color: '#14171a',
+    marginBottom: 6,
   },
-}));
+  input: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ccd6dd',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#14171a',
+  },
+  buttonContainer: {
+    marginTop: 24,
+    gap: 12,
+  },
+  button: {
+    borderRadius: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+  testButton: {
+    backgroundColor: '#17bf63',
+  },
+  saveButton: {
+    backgroundColor: '#1da1f2',
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  alert: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  alertSuccess: {
+    backgroundColor: '#e1f5fe',
+    borderColor: '#b3e5fc',
+    borderWidth: 1,
+  },
+  alertError: {
+    backgroundColor: '#ffebee',
+    borderColor: '#ffcdd2',
+    borderWidth: 1,
+  },
+  alertText: {
+    fontSize: 14,
+    color: '#0d3c55',
+  },
+});

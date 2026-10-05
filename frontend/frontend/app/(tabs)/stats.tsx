@@ -1,0 +1,345 @@
+import { useState } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { router } from "expo-router";
+import Ionicons from "@react-native-vector-icons/ionicons";
+
+import { usesNativeTabs } from "@/src/navigation";
+import { makeStyles, useTheme } from "@/src/theme";
+import { useActivities, useProfile, useStats, useWeeklySummary } from "@/src/api";
+import { unitsFor } from "@/src/units";
+import { ACTIVITY_LABELS } from "@/src/glucose";
+import { Card, Chip, ChipRow, EmptyState, ErrorState, LoadingState, PrimaryButton, StatTile } from "@/src/components/ui";
+import { GlucoseChart } from "@/src/components/GlucoseChart";
+import { DoctorReport } from "@/src/components/DoctorReport";
+import { useToast } from "@/src/components/Toast";
+
+const PERIODS = [
+  { days: 7, label: "7 jours" },
+  { days: 14, label: "14 jours" },
+  { days: 30, label: "30 jours" },
+];
+
+export default function Stats() {
+  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const [days, setDays] = useState(7);
+  const stats = useStats(days);
+  const profile = useProfile();
+  const activities = useActivities(200);
+  const units = unitsFor(profile.data?.glucose_unit);
+  const summary = useWeeklySummary();
+  const toast = useToast();
+  const bottomChrome = usesNativeTabs ? insets.bottom : 0;
+
+  const generateSummary = () => {
+    summary.mutate(undefined, { onError: (e) => toast.show(e.message, "error") });
+  };
+
+  return (
+    <View style={styles.root}>
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <Text style={styles.title}>Statistiques</Text>
+        <ChipRow>
+          {PERIODS.map((p) => (
+            <Chip key={p.days} label={p.label} selected={days === p.days} onPress={() => setDays(p.days)} testID={`stats-period-${p.days}`} />
+          ))}
+        </ChipRow>
+      </View>
+
+      {stats.isLoading ? (
+        <LoadingState label="Génération des graphiques…" />
+      ) : stats.isError ? (
+        <ErrorState message="Erreur lors du calcul des statistiques." onRetry={() => stats.refetch()} />
+      ) : !stats.data || stats.data.readings_count === 0 ? (
+        <EmptyState
+          icon={<Ionicons name="stats-chart" size={36} color={colors.brandPrimary} />}
+          title="Pas assez de données"
+          message="Enregistrez des glycémies pour visualiser vos tendances sur cette période."
+        />
+      ) : (
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: bottomChrome + 24 }} showsVerticalScrollIndicator={false}>
+          <Card testID="tir-card">
+            <View style={styles.tirHeader}>
+              <Text style={[styles.cardTitle, { marginBottom: 0, flex: 1 }]}>Temps dans la cible ({units.fmt(stats.data.target_low)}–{units.fmt(stats.data.target_high)})</Text>
+              <View style={[styles.goalBadge, { backgroundColor: `${stats.data.tir_in >= stats.data.tir_goal ? colors.success : colors.warning}1A` }]} testID="tir-goal-badge">
+                <Ionicons name={stats.data.tir_in >= stats.data.tir_goal ? "checkmark-circle" : "flag-outline"} size={14} color={stats.data.tir_in >= stats.data.tir_goal ? colors.success : colors.warning} />
+                <Text style={[styles.goalText, { color: stats.data.tir_in >= stats.data.tir_goal ? colors.success : colors.warning }]}>
+                  Objectif {stats.data.tir_goal} %{stats.data.tir_in >= stats.data.tir_goal ? " atteint" : ""}
+                </Text>
+              </View>
+            </View>
+            <Text style={[styles.tirValue, { color: stats.data.tir_in >= stats.data.tir_goal ? colors.success : colors.warning }]} testID="tir-value">
+              {stats.data.tir_in} %
+            </Text>
+            <View style={styles.tirBar}>
+              <View style={{ flex: stats.data.tir_low, backgroundColor: colors.error }} />
+              <View style={{ flex: stats.data.tir_in, backgroundColor: colors.success }} />
+              <View style={{ flex: stats.data.tir_high, backgroundColor: colors.warning }} />
+            </View>
+            <View style={styles.legend}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.error }]} />
+                <Text style={styles.legendText}>Sous la cible &lt; {units.fmt(stats.data.target_low)} · {stats.data.tir_low} %</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.success }]} />
+                <Text style={styles.legendText}>Cible · {stats.data.tir_in} %</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.warning }]} />
+                <Text style={styles.legendText}>Au-dessus &gt; {units.fmt(stats.data.target_high)} · {stats.data.tir_high} %</Text>
+              </View>
+            </View>
+            <Pressable onPress={() => router.push("/profil")} style={styles.linkButton} testID="edit-targets-link" accessibilityRole="button">
+              <Text style={styles.linkText}>Modifier mes objectifs</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
+            </Pressable>
+          </Card>
+
+          <View style={styles.tilesGrid}>
+            <StatTile label="Moyenne" value={stats.data.avg_glucose != null ? units.fmt(stats.data.avg_glucose) : "—"} unit={stats.data.avg_glucose != null ? units.label : undefined} color={colors.brandPrimary} />
+            <StatTile label="HbA1c estimée" value={stats.data.est_hba1c != null ? `${stats.data.est_hba1c}` : "—"} unit={stats.data.est_hba1c != null ? "%" : undefined} color={colors.brandPrimary} />
+            <StatTile label="Mesures" value={`${stats.data.readings_count}`} color={colors.onSurface} />
+          </View>
+          <View style={styles.tilesGrid}>
+            <StatTile label={`Sous cible (< ${units.fmt(stats.data.target_low)})`} value={`${stats.data.hypo_count}`} color={stats.data.hypo_count > 0 ? colors.error : colors.onSurface} />
+            <StatTile label={`Au-dessus (> ${units.fmt(stats.data.target_high)})`} value={`${stats.data.hyper_count}`} color={stats.data.hyper_count > 0 ? colors.warning : colors.onSurface} />
+            <StatTile label="Glucides" value={`${stats.data.carbs_total}`} unit="g" color={colors.onSurface} />
+          </View>
+          <View style={styles.tilesGrid}>
+            <StatTile label="Basale (lente)" value={`${stats.data.basal_total}`} unit="U" color={colors.brandPrimary} />
+            <StatTile label="Bolus (rapide)" value={`${stats.data.bolus_total}`} unit="U" color={colors.onSurface} />
+            <StatTile label="Basale / jour" value={`${stats.data.basal_daily_avg}`} unit="U" color={colors.onSurface} />
+          </View>
+
+          <Card testID="weight-card" style={{ marginTop: 12 }}>
+            <View style={styles.summaryHeader}>
+              <View style={styles.summaryIcon}>
+                <Ionicons name="scale-outline" size={18} color={colors.onBrandTertiary} />
+              </View>
+              <Text style={[styles.cardTitle, { marginBottom: 0, flex: 1 }]}>Évolution du poids</Text>
+              <Pressable onPress={() => router.push("/ajouter-poids")} style={styles.linkButton} testID="weight-add-link" accessibilityRole="button">
+                <Text style={styles.linkText}>Peser</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
+              </Pressable>
+            </View>
+            {stats.data.weight_count > 0 && stats.data.weight_delta != null ? (
+              <View style={styles.weightRow} testID="weight-summary">
+                <Text style={styles.weightValue}>{stats.data.weight_end} kg</Text>
+                <View style={[styles.weightBadge, { backgroundColor: `${stats.data.weight_delta > 0 ? colors.warning : stats.data.weight_delta < 0 ? colors.info : colors.muted}1A` }]}>
+                  <Ionicons
+                    name={stats.data.weight_delta > 0 ? "trending-up" : stats.data.weight_delta < 0 ? "trending-down" : "remove"}
+                    size={16}
+                    color={stats.data.weight_delta > 0 ? colors.warning : stats.data.weight_delta < 0 ? colors.info : colors.muted}
+                  />
+                  <Text style={[styles.weightDelta, { color: stats.data.weight_delta > 0 ? colors.warning : stats.data.weight_delta < 0 ? colors.info : colors.muted }]}>
+                    {stats.data.weight_delta > 0 ? "+" : ""}{stats.data.weight_delta} kg
+                  </Text>
+                </View>
+                <Text style={styles.weightMeta}>
+                  {stats.data.weight_count > 1 ? `depuis ${stats.data.weight_start} kg · ${stats.data.weight_count} pesées` : "1 pesée sur la période"}
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.summaryHint}>Aucune pesée sur cette période. Enregistrez votre poids pour suivre la tendance.</Text>
+            )}
+          </Card>
+
+          <DoctorReport />
+
+          <Card testID="ai-summary-card" style={{ marginTop: 12 }}>
+            <View style={styles.summaryHeader}>
+              <View style={styles.summaryIcon}>
+                <Ionicons name="sparkles" size={18} color={colors.onBrandTertiary} />
+              </View>
+              <Text style={styles.cardTitle}>Bilan IA de la semaine</Text>
+            </View>
+            {summary.data ? (
+              <Text style={styles.summaryText} testID="ai-summary-text">{summary.data.summary}</Text>
+            ) : (
+              <Text style={styles.summaryHint}>
+                Générez un résumé personnalisé de vos tendances des 7 derniers jours.
+              </Text>
+            )}
+            <PrimaryButton
+              label={summary.data ? "Régénérer le bilan" : "Générer mon bilan"}
+              onPress={generateSummary}
+              loading={summary.isPending}
+              variant="secondary"
+              testID="generate-summary-button"
+            />
+          </Card>
+
+          <Card testID="glucose-evolution-card" style={{ marginTop: 12 }}>
+            <Text style={styles.cardTitle}>Évolution de la glycémie</Text>
+            <GlucoseChart
+              points={stats.data.series.map((s) => ({ value: s.value_mgdl, at: s.measured_at }))}
+              targets={{ low: stats.data.target_low, high: stats.data.target_high }}
+              unit={units.unit}
+              markers={(activities.data ?? []).map((a) => ({
+                start: a.started_at,
+                end: new Date(new Date(a.started_at).getTime() + a.duration_min * 60_000).toISOString(),
+                label: ACTIVITY_LABELS[a.activity_type] ?? "Sport",
+              }))}
+            />
+            {stats.data.activity_count > 0 ? (
+              <Text style={styles.chartHint} testID="activity-chart-hint">
+                {stats.data.activity_count} séance{stats.data.activity_count > 1 ? "s" : ""} de sport ({stats.data.activity_minutes} min) sur la période — bandes bleues sur la courbe
+              </Text>
+            ) : null}
+          </Card>
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
+const useStyles = makeStyles((colors) => ({
+  root: {
+    flex: 1,
+    backgroundColor: colors.surface,
+  },
+  header: {
+    backgroundColor: colors.surface,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    gap: 4,
+  },
+  title: {
+    color: colors.onSurface,
+    fontSize: 22,
+    fontWeight: "500",
+    marginBottom: 8,
+  },
+  cardTitle: {
+    color: colors.onSurface,
+    fontSize: 15,
+    fontWeight: "500",
+    marginBottom: 12,
+  },
+  tirValue: {
+    fontSize: 40,
+    fontWeight: "500",
+    marginBottom: 10,
+  },
+  chartHint: {
+    color: colors.info,
+    fontSize: 12,
+    marginTop: 8,
+  },
+  tirHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  goalBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  goalText: {
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  tirBar: {
+    flexDirection: "row",
+    height: 12,
+    borderRadius: 6,
+    overflow: "hidden",
+    backgroundColor: colors.surfaceTertiary,
+  },
+  legend: {
+    marginTop: 12,
+    gap: 6,
+  },
+  legendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  legendText: {
+    color: colors.onSurfaceSecondary,
+    fontSize: 13,
+  },
+  tilesGrid: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+  },
+  summaryHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  summaryIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  summaryText: {
+    color: colors.onSurfaceSecondary,
+    fontSize: 14,
+    lineHeight: 21,
+    marginBottom: 12,
+  },
+  summaryHint: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 12,
+  },
+  linkButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    minHeight: 44,
+    paddingHorizontal: 4,
+  },
+  linkText: {
+    color: colors.brandPrimary,
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  weightRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  weightValue: {
+    color: colors.onSurface,
+    fontSize: 28,
+    fontWeight: "500",
+  },
+  weightBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  weightDelta: {
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  weightMeta: {
+    color: colors.muted,
+    fontSize: 12,
+  },
+}));

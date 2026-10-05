@@ -1,42 +1,47 @@
-import { Platform } from "react-native";
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
-import { storage } from "@/src/utils/storage";
-
-// Un seul endroit lit/écrit le jeton de session : AuthContext (écriture) et le client API (lecture).
-const TOKEN_KEY = "glycosoin_session_token";
+const TOKEN_KEY = 'glycosoin_session_token';
 
 export async function loadToken(): Promise<string | null> {
-  if (Platform.OS === "web") {
-    try {
-      return window.localStorage.getItem(TOKEN_KEY);
-    } catch {
+  try {
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        return window.localStorage.getItem(TOKEN_KEY);
+      }
       return null;
     }
+    return await SecureStore.getItemAsync(TOKEN_KEY);
+  } catch (e) {
+    console.warn('Erreur lors du chargement du jeton :', e);
+    return null;
   }
-  const value = await storage.secureGet(TOKEN_KEY, "");
-  return value ? value : null;
 }
 
 export async function persistToken(token: string): Promise<void> {
-  if (Platform.OS === "web") {
-    try {
-      window.localStorage.setItem(TOKEN_KEY, token);
-    } catch {
-      /* ignore */
+  try {
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(TOKEN_KEY, token);
+      }
+      return;
     }
-    return;
+    await SecureStore.setItemAsync(TOKEN_KEY, token);
+  } catch (e) {
+    console.warn('Erreur lors de la sauvegarde du jeton :', e);
   }
-  await storage.secureSet(TOKEN_KEY, token);
 }
 
 export async function clearToken(): Promise<void> {
-  if (Platform.OS === "web") {
-    try {
-      window.localStorage.removeItem(TOKEN_KEY);
-    } catch {
-      /* ignore */
+  try {
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem(TOKEN_KEY);
+      }
+      return;
     }
-    return;
+    await SecureStore.deleteItemAsync(TOKEN_KEY);
+  } catch (e) {
+    console.warn('Erreur lors de la suppression du jeton :', e);
   }
-  await storage.secureRemove(TOKEN_KEY);
 }

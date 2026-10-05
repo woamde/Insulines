@@ -1,241 +1,214 @@
-import React, { useEffect, useState } from 'react';
-import { 
-  StyleSheet, 
-  Text, 
-  View, 
-  ScrollView, 
-  ActivityIndicator, 
-  RefreshControl, 
-  TouchableOpacity, 
-  Alert, 
-  Platform 
+import React, { useCallback, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  RefreshControl,
 } from 'react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useProfile, useStats } from '@/src/api';
 
-const getApiUrl = () => {
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL;
-  }
-  if (typeof window !== 'undefined' && window.location?.hostname) {
-    return `http://${window.location.hostname}:8002`;
-  }
-  return "http://127.0.0.1:8002";
-};
+const API_URL = 'http://127.0.0.1:8000/api/journal';
 
-export default function DashboardScreen() {
-  const [profile, setProfile] = useState<any>(null);
-  const [stats, setStats] = useState<any>(null);
-  const [latestReadings, setLatestReadings] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function HomeScreen() {
+  const router = useRouter();
+  
+  const { data: profile, refetch: refetchProfile } = useProfile();
+  const { data: stats, refetch: refetchStats } = useStats(7);
+
+  const [journalEntries, setJournalEntries] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  async function fetchData() {
-    const apiUrl = getApiUrl();
+  const fetchJournal = async () => {
     try {
-      setError(null);
-      const token = typeof window !== 'undefined' 
-        ? localStorage.getItem('token') || localStorage.getItem('session_token') 
-        : '';
-
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-      };
-
-      const fetchOptions: RequestInit = { headers, mode: 'cors' };
-
-      // Exécution parallèle sans blocage global
-      const [profileRes, statsRes, glucoseRes] = await Promise.allSettled([
-        fetch(`${apiUrl}/api/profile`, fetchOptions),
-        fetch(`${apiUrl}/api/stats?days=7`, fetchOptions),
-        fetch(`${apiUrl}/api/glucose?limit=5`, fetchOptions)
-      ]);
-
-      if (profileRes.status === 'fulfilled' && profileRes.value.ok) {
-        setProfile(await profileRes.value.json());
+      const response = await fetch(API_URL);
+      
+      if (!response.ok) {
+        throw new Error(`Le serveur a répondu avec le statut ${response.status}`);
       }
 
-      if (statsRes.status === 'fulfilled' && statsRes.value.ok) {
-        setStats(await statsRes.value.json());
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        setJournalEntries(data);
       }
-
-      if (glucoseRes.status === 'fulfilled' && glucoseRes.value.ok) {
-        const glucoseData = await glucoseRes.value.json();
-        const items = Array.isArray(glucoseData) ? glucoseData : (glucoseData.readings || []);
-        setLatestReadings(items.slice(0, 5));
-      }
-
-      if (
-        profileRes.status === 'rejected' && 
-        statsRes.status === 'rejected' && 
-        glucoseRes.status === 'rejected'
-      ) {
-        setError("Impossible de contacter le serveur backend. Assurez-vous que l'API tourne sur le port 8002.");
-      }
-    } catch (err: any) {
-      setError(`Erreur réseau : ${err.message || "Connexion refusée"}`);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }
-
-  // Lancement de la synchronisation capteur + rafraîchissement d'état
-  const handleSync = async () => {
-    const apiUrl = getApiUrl();
-    setSyncing(true);
-    try {
-      const token = typeof window !== 'undefined' 
-        ? localStorage.getItem('token') || localStorage.getItem('session_token') 
-        : '';
-
-      const res = await fetch(`${apiUrl}/api/sync`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        }
-      });
-
-      if (res.ok) {
-        // Rechargement immédiat de l'écran avec les nouvelles données capteur
-        await fetchData();
-
-        const msg = 'Données du capteur actualisées avec succès.';
-        if (Platform.OS === 'web') window.alert(`Synchronisation\n${msg}`);
-        else Alert.alert('Synchronisation', msg);
-      } else {
-        throw new Error(`Code statut : ${res.status}`);
-      }
-    } catch (err: any) {
-      const errMsg = "Échec de la synchronisation avec le capteur.";
-      if (Platform.OS === 'web') window.alert(`Erreur\n${errMsg}`);
-      else Alert.alert('Erreur', errMsg);
-    } finally {
-      setSyncing(false);
+    } catch (error) {
+      console.error("Erreur lors de la récupération du journal :", error);
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      refetchProfile();
+      refetchStats();
+      fetchJournal();
+    }, [refetchProfile, refetchStats])
+  );
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
-    fetchData();
+    await Promise.all([refetchProfile(), refetchStats(), fetchJournal()]);
+    setRefreshing(false);
   };
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Chargement de GlycoSoin...</Text>
-      </View>
-    );
-  }
+  const username = profile?.name || profile?.first_name || profile?.username || 'Patient';
+
+  const formatParisTime = (timestamp?: string) => {
+    if (!timestamp) return '';
+    try {
+      const date = new Date(timestamp);
+      return date.toLocaleString('fr-FR', {
+        timeZone: 'Europe/Paris',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
+  };
+
+  // Fonction pour déterminer la couleur en fonction du taux de glycémie
+  const getGlucoseColor = (value: number | string) => {
+    const num = Number(value);
+    if (isNaN(num)) return '#1C1C1E'; // Couleur par défaut si la valeur n'est pas un nombre
+    if (num < 70) return '#EAB308';   // Jaune (Hypoglycémie) - nuance lisible sur fond blanc
+    if (num > 180) return '#EF4444';  // Rouge (Hyperglycémie)
+    return '#22C55E';                 // Vert (Dans la cible)
+  };
 
   return (
     <ScrollView 
-      contentContainerStyle={styles.container}
+      style={styles.container} 
+      contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      {/* En-tête avec Bouton de Synchronisation */}
-      <View style={styles.headerContainer}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Bonjour, {profile?.first_name || 'Patient'}</Text>
-          <Text style={styles.subtitle}>Suivi glycémique et insuline</Text>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.greeting}>Bonjour, {username}</Text>
+          <Text style={styles.subtitle}>Suivi glycémique et insuline unifié</Text>
         </View>
 
         <TouchableOpacity 
-          style={[styles.syncButton, syncing && styles.syncButtonDisabled]} 
-          onPress={handleSync}
-          disabled={syncing}
+          style={styles.syncButton} 
+          onPress={() => router.push('/profil')}
+          activeOpacity={0.8}
         >
-          {syncing ? (
-            <ActivityIndicator size="small" color="#ffffff" />
-          ) : (
-            <Text style={styles.syncButtonText}>Synchroniser</Text>
-          )}
+          <Text style={styles.syncButtonText}>Mon Profil</Text>
         </TouchableOpacity>
       </View>
 
-      {error && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
-
-      {/* Carte des Statistiques */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Statistiques (7 derniers jours)</Text>
+      <View style={styles.statsCard}>
+        <Text style={styles.sectionTitle}>Statistiques (7 derniers jours)</Text>
         <View style={styles.statsRow}>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{stats?.average ?? '--'} mg/dL</Text>
+          <View style={styles.statBox}>
+            <Text style={styles.statValue}>
+              {stats?.avg ? `${Math.round(stats.avg)} mg/dL` : '—'}
+            </Text>
             <Text style={styles.statLabel}>Moyenne</Text>
           </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{stats?.in_range_pct ?? '--'}%</Text>
+          <View style={styles.statBox}>
+            <Text style={styles.statValue}>
+              {stats?.tir !== undefined ? `${Math.round(stats.tir)}%` : '--%'}
+            </Text>
             <Text style={styles.statLabel}>Dans la cible</Text>
           </View>
         </View>
       </View>
 
-      {/* Section des Dernières Mesures */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Dernières mesures</Text>
-      </View>
+      <Text style={styles.sectionTitleHeader}>Dernières mesures</Text>
+      
+      {journalEntries.length > 0 ? (
+        journalEntries.slice(0, 30).map((item: any, index: number) => {
+          const formattedDate = formatParisTime(item.timestamp);
+          return (
+            <View key={item.id || index} style={styles.measureCard}>
+              <View style={styles.cardHeaderRow}>
+                {formattedDate ? (
+                  <Text style={styles.measureDate}>{formattedDate}</Text>
+                ) : null}
+                {item.note ? (
+                  <Text style={styles.noteText} numberOfLines={1}>Note : {item.note}</Text>
+                ) : null}
+              </View>
 
-      {latestReadings.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyText}>Aucune mesure récente trouvée.</Text>
-        </View>
-      ) : (
-        latestReadings.map((item, index) => (
-          <View key={item.id || item._id || index} style={styles.readingCard}>
-            <View style={styles.readingRow}>
-              <Text style={styles.readingValue}>
-                {item.value_mgdl ?? item.value ?? '--'} <Text style={styles.unitText}>mg/dL</Text>
-              </Text>
-              <Text style={styles.badge}>{item.source || 'libre'}</Text>
+              <View style={styles.inlineDetails}>
+                {item.glucose ? (
+                  <View style={styles.glucoseSection}>
+                    <Text 
+                      style={[
+                        styles.measureValue, 
+                        // Application dynamique de la couleur ici
+                        { color: getGlucoseColor(item.glucose.value) }
+                      ]}
+                    >
+                      📊 {item.glucose.value} <Text style={styles.unit}>{item.glucose.unit || 'mg/dL'}</Text>
+                    </Text>
+                    <Text style={styles.badge}>{item.glucose.source || 'manuel'}</Text>
+                  </View>
+                ) : null}
+
+                {item.insulin ? (
+                  <View style={styles.insulinSection}>
+                    <Text style={styles.insulinValue}>
+                      💉 {item.insulin.units} <Text style={styles.unit}>U</Text>
+                    </Text>
+                    <Text style={styles.insulinBadge}>{item.insulin.kind || 'bolus'}</Text>
+                  </View>
+                ) : null}
+              </View>
             </View>
-            <Text style={styles.readingDate}>
-              {item.measured_at ? new Date(item.measured_at).toLocaleString('fr-FR') : 'Date inconnue'}
-            </Text>
-          </View>
-        ))
+          );
+        })
+      ) : (
+        <View style={styles.centerBox}>
+          <Text style={styles.emptyText}>Aucune mesure trouvée dans le journal.</Text>
+        </View>
       )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, backgroundColor: '#f8f9fa', flexGrow: 1 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  loadingText: { marginTop: 10, color: '#666', fontSize: 16 },
-  headerContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
-  header: { flex: 1 },
-  title: { fontSize: 26, fontWeight: 'bold', color: '#333' },
-  subtitle: { fontSize: 14, color: '#666', marginTop: 4 },
-  syncButton: { backgroundColor: '#007AFF', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, marginLeft: 10 },
-  syncButtonDisabled: { backgroundColor: '#99c2ff' },
-  syncButtonText: { color: '#ffffff', fontWeight: '600', fontSize: 13 },
-  card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 20, elevation: 3 },
-  cardTitle: { fontSize: 16, fontWeight: '600', marginBottom: 12, color: '#333' },
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
+  content: { padding: 20, paddingBottom: 40 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  greeting: { fontSize: 26, fontWeight: 'bold', color: '#1C1C1E' },
+  subtitle: { fontSize: 14, color: '#6E6E73', marginTop: 2 },
+  syncButton: { backgroundColor: '#007AFF', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
+  syncButtonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 },
+  statsCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, marginBottom: 24, elevation: 2 },
+  sectionTitle: { fontSize: 15, fontWeight: '600', color: '#3A3A3C', marginBottom: 16 },
+  sectionTitleHeader: { fontSize: 18, fontWeight: 'bold', color: '#1C1C1E', marginBottom: 12 },
   statsRow: { flexDirection: 'row', justifyContent: 'space-around' },
-  statItem: { alignItems: 'center' },
+  statBox: { alignItems: 'center' },
   statValue: { fontSize: 22, fontWeight: 'bold', color: '#007AFF' },
-  statLabel: { fontSize: 12, color: '#666', marginTop: 4 },
-  sectionHeader: { marginBottom: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-  readingCard: { backgroundColor: '#fff', borderRadius: 10, padding: 14, marginBottom: 10, elevation: 2 },
-  readingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  readingValue: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50' },
-  unitText: { fontSize: 12, fontWeight: 'normal', color: '#7f8c8d' },
-  badge: { fontSize: 11, color: '#007AFF', backgroundColor: '#eef6ff', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  readingDate: { fontSize: 12, color: '#888', marginTop: 6 },
-  emptyCard: { backgroundColor: '#fff', padding: 20, borderRadius: 10, alignItems: 'center' },
-  emptyText: { color: '#888' },
-  errorBox: { backgroundColor: '#ffebee', padding: 12, borderRadius: 8, marginBottom: 16 },
-  errorText: { color: '#c62828', textAlign: 'center' },
+  statLabel: { fontSize: 12, color: '#8E8E93', marginTop: 4 },
+  measureCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, marginBottom: 10, elevation: 1 },
+  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  measureDate: { fontSize: 12, color: '#8E8E93' },
+  noteText: { fontSize: 12, color: '#555', fontStyle: 'italic', maxWidth: '50%' },
+  
+  inlineDetails: { 
+    flexDirection: 'row', 
+    justifyContent: 'flex-start', 
+    alignItems: 'center', 
+    marginTop: 4,
+    gap: 20,
+    flexWrap: 'wrap'
+  },
+  
+  glucoseSection: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  insulinSection: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // La couleur de measureValue par défaut est surchargée par getGlucoseColor()
+  measureValue: { fontSize: 18, fontWeight: 'bold' },
+  insulinValue: { fontSize: 18, fontWeight: 'bold', color: '#D97706' },
+  unit: { fontSize: 12, fontWeight: 'normal', color: '#8E8E93' },
+  badge: { backgroundColor: '#E8F2FF', color: '#007AFF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, fontSize: 12, overflow: 'hidden' },
+  insulinBadge: { backgroundColor: '#FEF3C7', color: '#D97706', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, fontSize: 12, overflow: 'hidden' },
+  centerBox: { marginTop: 30, alignItems: 'center' },
+  emptyText: { color: '#8E8E93', fontSize: 14 },
 });

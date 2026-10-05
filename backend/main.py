@@ -1,236 +1,309 @@
-﻿import datetime
-import os
-import asyncio
-from contextlib import asynccontextmanager
-import motor.motor_asyncio
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status
+﻿from contextlib import asynccontextmanager
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Any
+
+from fastapi import FastAPI, APIRouter, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
-from typing import Optional
+from bson import ObjectId
 
-# Imports locaux
-from auth import get_current_user
+# 1. Configuration et connexion MongoDB
+MONGODB_URL = "mongodb://localhost:27017"
+DATABASE_NAME = "glycosoin_db"
 
-try:
-    import cgm
-    from cgm import register_cgm
-except ImportError:
-    cgm = None
-    def register_cgm(router, db, auth_dep):
-        pass
-
-# Modèle Pydantic pour le profil
-class ProfileSchema(BaseModel):
-    first_name: Optional[str] = None
-    firstName: Optional[str] = None
-    name: Optional[str] = None
-    target_min: Optional[float] = None
-    targetMin: Optional[float] = None
-    target_max: Optional[float] = None
-    targetMax: Optional[float] = None
-    diabetes_type: Optional[str] = None
-    diabetesType: Optional[str] = None
-    weight: Optional[float] = None
-    height: Optional[float] = None
-
-# Cache en mémoire avec valeurs par défaut
-user_profile_cache = {
-    "id": "demo",
-    "user_id": "demo",
-    "first_name": "Abderahim",
-    "firstName": "Abderahim",
-    "name": "Abderahim",
-    "target_min": 70.0,
-    "targetMin": 70.0,
-    "target_max": 180.0,
-    "targetMax": 180.0,
-    "diabetes_type": "type1",
-    "diabetesType": "type1",
-    "weight": 70.0,
-    "height": 170.0,
-    "is_configured": True,
-    "isConfigured": True,
-    "configured": True
-}
-
-# Connexion MongoDB
-def get_db():
-    mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017")
-    db_name = os.getenv("DB_NAME", "insulines")
-    client = motor.motor_asyncio.AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=2000)
-    return client[db_name]
-
-db_instance = get_db()
-
-def to_local_iso(dt_val):
-    if not dt_val:
-        return None
-    try:
-        if isinstance(dt_val, str):
-            dt_obj = datetime.datetime.fromisoformat(dt_val.replace("Z", "+00:00"))
-        elif isinstance(dt_val, datetime.datetime):
-            dt_obj = dt_val
-        else:
-            return str(dt_val)
-        if dt_obj.tzinfo is None:
-            dt_obj = dt_obj.replace(tzinfo=datetime.timezone.utc)
-        return dt_obj.astimezone().isoformat()
-    except Exception:
-        return str(dt_val)
-
-# Worker de synchronisation en arrière-plan (exécuté toutes les 5 minutes)
-async def cgm_auto_sync_worker():
-    while True:
-        try:
-            if cgm and hasattr(cgm, "fetch_latest_from_libre"):
-                db = get_db()
-                await cgm.fetch_latest_from_libre(db, {"_id": "user_patient_default"})
-        except Exception as e:
-            print(f"[Auto-Sync Error] : {e}")
-        await asyncio.sleep(300)
+client: Optional[AsyncIOMotorClient] = None
+db: Any = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Démarrage de la tâche de synchro en tâche de fond
-    sync_task = asyncio.create_task(cgm_auto_sync_worker())
+    global client, db
+    client = AsyncIOMotorClient(MONGODB_URL)
+    db = client[DATABASE_NAME]
     yield
-    sync_task.cancel()
+    if client:
+        client.close()
 
-app = FastAPI(
-    title="GlycoSoin API",
-    description="API de suivi glycémique",
-    version="1.0.0",
-    lifespan=lifespan
-)
+# 2. Initialisation de FastAPI
+app = FastAPI(title="GlycoSoin API", lifespan=lifespan)
 
+# 3. Configuration CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-api_router = APIRouter()
+# 4. Routeurs
+auth_router = APIRouter(prefix="/auth", tags=["auth"])
+api_router = APIRouter(tags=["default"])
 
-@api_router.get("/health")
-async def health_check():
-    return {"status": "ok"}
+# 5. Structure par défaut du profil
+DEFAULT_PROFILE = {
+    "name": "Utilisateur",
+    "email": "patient@example.com",
+    "age": None,
+    "height_cm": None,
+    "weight_kg": None,
+    "diabetes_years": None,
+    "ic_ratio": 10.0,
+    "isf": 30.0,
+    "target_glucose": 100.0,
+    "target_low": 70.0,
+    "target_high": 180.0,
+    "tir_goal": 70.0,
+    "doctor_name": "",
+    "doctor_email": "",
+    "glucose_unit": "mgdl",
+    "profile_completed": False,
+}
 
-@api_router.get("/profile")
-@api_router.get("/api/profile")
-async def get_profile(current_user: dict = Depends(get_current_user)):
+# 6. Modèles Pydantic
+class GlucoseInput(BaseModel):
+    value: Optional[float] = None
+    value_mgdl: Optional[float] = None
+    unit: str = "mg/dL"
+    source: Optional[str] = "manuel"
+    timestamp: Optional[datetime] = None
+    measured_at: Optional[datetime] = None
+    note: Optional[str] = None
+
+class InsulinInput(BaseModel):
+    units: float
+    kind: str = "bolus"
+    insulin_name: Optional[str] = "humalog"
+    timestamp: Optional[datetime] = None
+    injected_at: Optional[datetime] = None
+    note: Optional[str] = None
+
+class ProfileModel(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    age: Optional[int] = None
+    height_cm: Optional[float] = None
+    weight_kg: Optional[float] = None
+    diabetes_years: Optional[float] = None
+    ic_ratio: Optional[float] = None
+    isf: Optional[float] = None
+    target_glucose: Optional[float] = None
+    target_low: Optional[float] = None
+    target_high: Optional[float] = None
+    tir_goal: Optional[float] = None
+    doctor_name: Optional[str] = None
+    doctor_email: Optional[str] = None
+    glucose_unit: Optional[str] = None
+    profile_completed: Optional[bool] = None
+
+class CGMCredentials(BaseModel):
+    email: str
+    password: str
+
+# 7. Endpoints Glycémie (POST + GET + DELETE)
+@api_router.post("/glucose")
+async def add_glucose(data: GlucoseInput):
+    val = data.value if data.value is not None else data.value_mgdl
+    ts = data.timestamp if data.timestamp is not None else data.measured_at
+    if not ts:
+        ts = datetime.now(timezone.utc)
+    doc = {
+        "value": val,
+        "unit": data.unit,
+        "timestamp": ts,
+        "source": data.source,
+        "note": data.note
+    }
+    result = await db.glucose_readings.insert_one(doc)
+    return {"message": "Mesure ajoutée", "id": str(result.inserted_id)}
+
+@api_router.get("/glucose")
+async def get_glucose(limit: int = Query(30, ge=1, le=1000)):
+    cursor = db.glucose_readings.find().sort("timestamp", -1).limit(limit)
+    readings = []
+    async for doc in cursor:
+        doc["id"] = str(doc.pop("_id"))
+        readings.append(doc)
+    return readings
+
+@api_router.delete("/glucose/{item_id}")
+async def delete_glucose(item_id: str):
     try:
-        db = get_db()
-        doc = await db["profiles"].find_one({"user_id": "demo"})
-        if doc:
-            doc.pop("_id", None)
-            user_profile_cache.update(doc)
-    except Exception as e:
-        print(f"Mongo get profile warning: {e}")
-    return user_profile_cache
+        obj_id = ObjectId(item_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID invalide")
+    
+    result = await db.glucose_readings.delete_one({"_id": obj_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Élément introuvable")
+    return {"message": "Glycémie supprimée avec succès"}
+
+# 8. Endpoints Insuline (POST + GET + DELETE)
+@api_router.post("/insulin")
+async def add_insulin(data: InsulinInput):
+    ts = data.timestamp if data.timestamp is not None else data.injected_at
+    if not ts:
+        ts = datetime.now(timezone.utc)
+    doc = {
+        "units": data.units,
+        "kind": data.kind,
+        "insulin_name": data.insulin_name,
+        "timestamp": ts,
+        "note": data.note
+    }
+    result = await db.insulin_doses.insert_one(doc)
+    return {"message": "Dose d'insuline ajoutée", "id": str(result.inserted_id)}
+
+@api_router.get("/insulin")
+async def get_insulin(limit: int = Query(300, ge=1, le=1000)):
+    cursor = db.insulin_doses.find().sort("timestamp", -1).limit(limit)
+    doses = []
+    async for doc in cursor:
+        doc["id"] = str(doc.pop("_id"))
+        doses.append(doc)
+    return doses
+
+@api_router.delete("/insulin/{item_id}")
+async def delete_insulin(item_id: str):
+    try:
+        obj_id = ObjectId(item_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID invalide")
+    
+    result = await db.insulin_doses.delete_one({"_id": obj_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Élément introuvable")
+    return {"message": "Dose d'insuline supprimée avec succès"}
+
+# 9. Endpoint Journal Combiné (Glycémie + Insuline groupées par proximité temporelle)
+@api_router.get("/journal")
+async def get_journal(limit: int = Query(50, ge=1, le=1000)):
+    # Récupération des glycémies
+    glucose_cursor = db.glucose_readings.find().sort("timestamp", -1).limit(limit)
+    glucose_items = []
+    async for doc in glucose_cursor:
+        ts = doc.get("timestamp") or doc.get("measured_at")
+        glucose_items.append({
+            "id": str(doc["_id"]),
+            "type": "glucose",
+            "value": doc.get("value") if doc.get("value") is not None else doc.get("value_mgdl"),
+            "unit": doc.get("unit", "mg/dL"),
+            "timestamp": ts,
+            "source": doc.get("source", "manuel"),
+            "note": doc.get("note")
+        })
+
+    # Récupération des doses d'insuline
+    insulin_cursor = db.insulin_doses.find().sort("timestamp", -1).limit(limit)
+    insulin_items = []
+    async for doc in insulin_cursor:
+        ts = doc.get("timestamp") or doc.get("injected_at")
+        insulin_items.append({
+            "id": str(doc["_id"]),
+            "type": "insulin",
+            "units": doc.get("units"),
+            "kind": doc.get("kind", "bolus"),
+            "insulin_name": doc.get("insulin_name", "humalog"),
+            "timestamp": ts,
+            "note": doc.get("note")
+        })
+
+    # Fusion et association par proximité temporelle (ou horodatage exact)
+    combined = []
+    processed_insulin_ids = set()
+
+    for g in glucose_items:
+        g_time = g["timestamp"]
+        matched_insulin = None
+        
+        if g_time:
+            for ins in insulin_items:
+                if ins["id"] not in processed_insulin_ids and ins["timestamp"]:
+                    # Si l'écart est inférieur à 1 minute (ou même timestamp)
+                    diff = abs((g_time - ins["timestamp"]).total_seconds())
+                    if diff < 60:
+                        matched_insulin = ins
+                        processed_insulin_ids.add(ins["id"])
+                        break
+
+        combined.append({
+            "id": f"combo_{g['id']}",
+            "timestamp": g_time,
+            "glucose": g,
+            "insulin": matched_insulin,
+            "note": g["note"] or (matched_insulin.get("note") if matched_insulin else None)
+        })
+
+    # Ajouter les insulines restantes qui n'ont pas trouvé de glycémie associée
+    for ins in insulin_items:
+        if ins["id"] not in processed_insulin_ids:
+            combined.append({
+                "id": f"insulin_only_{ins['id']}",
+                "timestamp": ins["timestamp"],
+                "glucose": None,
+                "insulin": ins,
+                "note": ins["note"]
+            })
+
+    # Tri global du journal par date décroissante
+    combined.sort(key=lambda x: x["timestamp"] if x["timestamp"] else datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    
+    return combined[:limit]
+
+# 10. Endpoint Statistiques
+@api_router.get("/stats")
+async def get_stats(days: int = Query(7, ge=1)):
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    cursor = db.glucose_readings.find({"timestamp": {"$gte": since}})
+    readings = [doc["value"] async for doc in cursor if doc.get("value") is not None]
+
+    if not readings:
+        cursor = db.glucose_readings.find()
+        readings = [doc["value"] async for doc in cursor if doc.get("value") is not None]
+
+    if not readings:
+        return {"average": 0, "min": 0, "max": 0, "count": 0, "period_days": days}
+
+    return {
+        "average": round(sum(readings) / len(readings), 1),
+        "min": min(readings),
+        "max": max(readings),
+        "count": len(readings),
+        "period_days": days,
+    }
+
+# 11. Endpoints Profil (GET + PUT + POST)
+@api_router.get("/profile")
+async def get_profile():
+    profile = await db.profiles.find_one()
+    if not profile:
+        return DEFAULT_PROFILE
+    profile["id"] = str(profile.pop("_id"))
+    return {**DEFAULT_PROFILE, **profile}
 
 @api_router.put("/profile")
 @api_router.post("/profile")
-@api_router.put("/api/profile")
-@api_router.post("/api/profile")
-async def update_profile(data: ProfileSchema, current_user: dict = Depends(get_current_user)):
-    fn = data.first_name or data.firstName or data.name or user_profile_cache.get("first_name", "Abderahim")
-    t_min = data.target_min if data.target_min is not None else (data.targetMin if data.targetMin is not None else user_profile_cache.get("target_min", 70.0))
-    t_max = data.target_max if data.target_max is not None else (data.targetMax if data.targetMax is not None else user_profile_cache.get("target_max", 180.0))
-    d_type = data.diabetes_type or data.diabetesType or user_profile_cache.get("diabetes_type", "type1")
-    weight = data.weight if data.weight is not None else user_profile_cache.get("weight", 70.0)
-    height = data.height if data.height is not None else user_profile_cache.get("height", 170.0)
+async def save_profile(data: ProfileModel):
+    payload = {k: v for k, v in data.model_dump().items() if v is not None}
+    if payload:
+        await db.profiles.update_one({}, {"$set": payload}, upsert=True)
+    profile = await db.profiles.find_one()
+    if profile:
+        profile["id"] = str(profile.pop("_id"))
+        return {**DEFAULT_PROFILE, **profile}
+    return DEFAULT_PROFILE
 
-    updated_data = {
-        "id": "demo",
-        "user_id": "demo",
-        "first_name": fn,
-        "firstName": fn,
-        "name": fn,
-        "target_min": float(t_min),
-        "targetMin": float(t_min),
-        "target_max": float(t_max),
-        "targetMax": float(t_max),
-        "diabetes_type": d_type,
-        "diabetesType": d_type,
-        "weight": float(weight),
-        "height": float(height),
-        "is_configured": True,
-        "isConfigured": True,
-        "configured": True
-    }
+# 12. Endpoints CGM LibreLinkUp
+@api_router.post("/cgm/test")
+async def test_cgm_connection(credentials: CGMCredentials):
+    return {"status": "success", "message": "Connexion établie (simulation)"}
 
-    user_profile_cache.update(updated_data)
+@api_router.post("/cgm/settings")
+async def save_cgm_settings(credentials: CGMCredentials):
+    doc = credentials.model_dump()
+    await db.cgm_settings.update_one({}, {"$set": doc}, upsert=True)
+    return {"status": "success", "message": "Paramètres enregistrés"}
 
-    try:
-        db = get_db()
-        await db["profiles"].update_one(
-            {"user_id": "demo"},
-            {"$set": updated_data},
-            upsert=True
-        )
-    except Exception as e:
-        print(f"Mongo update profile warning: {e}")
-
-    return {"status": "ok", "profile": user_profile_cache}
-
-@api_router.get("/stats")
-@api_router.get("/api/stats")
-async def get_stats(days: int = 7, current_user: dict = Depends(get_current_user)):
-    try:
-        db = get_db()
-        docs = await db["glucose_readings"].find({}).to_list(length=500)
-    except Exception:
-        docs = []
-
-    values = [float(d.get("value_mgdl") or d.get("value") or 110) for d in docs if d]
-    if not values:
-        values = [110, 120, 115]
-
-    avg = round(sum(values) / len(values))
-    in_range = round((sum(1 for v in values if 70 <= v <= 180) / len(values)) * 100)
-
-    return {
-        "average": avg,
-        "in_range_pct": in_range,
-        "period_days": days
-    }
-
-@api_router.get("/glucose")
-@api_router.get("/api/glucose")
-@api_router.get("/measurements")
-@api_router.get("/api/measurements")
-async def get_glucose(limit: int = 100, current_user: dict = Depends(get_current_user)):
-    now = datetime.datetime.now(datetime.timezone.utc)
-    try:
-        db = get_db()
-        cursor = db["glucose_readings"].find({}).sort([("measured_at", -1), ("created_at", -1)]).limit(limit)
-        docs = await cursor.to_list(length=limit)
-    except Exception:
-        docs = []
-
-    readings = []
-    for doc in docs:
-        raw_date = doc.get("measured_at") or doc.get("timestamp") or doc.get("created_at") or now
-        val = doc.get("value_mgdl") or doc.get("value") or 110
-        readings.append({
-            "_id": str(doc["_id"]),
-            "user_id": str(doc.get("user_id", "")),
-            "value": val,
-            "value_mgdl": val,
-            "measured_at": to_local_iso(raw_date),
-            "timestamp": to_local_iso(raw_date),
-            "source": doc.get("source", "Libre"),
-            "trend": doc.get("trend", "Flat"),
-            "trend_arrow": doc.get("trend_arrow", "→")
-        })
-
-    return readings
-
-register_cgm(api_router, db_instance, get_current_user)
-app.include_router(api_router)
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)
+# 13. Inclusion des routeurs
+app.include_router(auth_router, prefix="/api")
+app.include_router(api_router, prefix="/api")

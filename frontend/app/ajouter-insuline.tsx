@@ -1,144 +1,167 @@
-import { useState } from "react";
-import { Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
-import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import Ionicons from "@react-native-vector-icons/ionicons";
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Alert,
+} from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 
-import { makeStyles, useTheme } from "@/src/theme";
-import { useAddInsulin, useInsulin } from "@/src/api";
-import { INSULIN_KIND_LABELS, formatDayLabel, formatTime, parseNum, round1 } from "@/src/glucose";
-import { Card, Chip, ChipRow, PrimaryButton, TextField } from "@/src/components/ui";
-import { useToast } from "@/src/components/Toast";
-import type { InsulinKind } from "@/src/types";
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8002";
 
-const KINDS: { key: InsulinKind; label: string; hint: string }[] = [
-  { key: "basale", label: "Basale (lente)", hint: "Insuline lente quotidienne (Lantus, Toujeo, Tresiba, Levemir…)." },
-  { key: "bolus", label: "Bolus (rapide)", hint: "Insuline rapide hors calculateur de repas." },
-  { key: "correction", label: "Correction", hint: "Dose de correction d'une hyperglycémie." },
-];
+export default function AjouterInsulineScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams();
 
-const BASAL_NAMES = ["Lantus", "Toujeo", "Tresiba", "Levemir", "Abasaglar"];
+  // Récupération sécurisée des paramètres d'URL s'ils existent
+  const initialUnits = params?.units ? String(params.units) : '';
+  const rawKind = params?.kind ? String(params.kind) : 'bolus';
+  const initialKind = ['bolus', 'basal'].includes(rawKind) ? rawKind : 'bolus';
 
-export default function AjouterInsuline() {
-  const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
-  const styles = useStyles();
-  const toast = useToast();
-  const add = useAddInsulin();
-  const history = useInsulin(20);
+  const [units, setUnits] = useState(initialUnits);
+  const [glycemia, setGlycemia] = useState('');
+  const [note, setNote] = useState('');
 
-  const [kind, setKind] = useState<InsulinKind>("basale");
-  const [units, setUnits] = useState("");
-  const [name, setName] = useState("");
-  const [note, setNote] = useState("");
+  const handleSaveSimultaneous = async () => {
+    const g = parseFloat(glycemia);
+    const u = parseFloat(units);
 
-  const parsed = parseNum(units);
-  const valid = parsed != null && parsed > 0 && parsed <= 200;
-  const lastBasal = history.data?.find((d) => d.kind === "basale");
-  const current = KINDS.find((k) => k.key === kind)!;
+    if (isNaN(g) && isNaN(u)) {
+      Alert.alert('Erreur', 'Veuillez renseigner au moins une glycémie ou une dose d\'insuline.');
+      return;
+    }
 
-  const save = () => {
-    if (!valid || parsed == null) return;
-    add.mutate(
-      { units: parsed, kind, insulin_name: name.trim(), note: note.trim() },
-      {
-        onSuccess: () => {
-          toast.show(kind === "basale" ? "Insuline basale enregistrée" : "Injection enregistrée", "success");
-          router.back();
-        },
-        onError: (e) => toast.show(e.message, "error"),
-      },
-    );
+    try {
+      const token = typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('session_token')) : '';
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      // Horodatage unique et partagé pour lier parfaitement les deux entrées dans le journal
+      const exactTimestamp = new Date().toISOString();
+
+      // 1. Enregistrement de la glycémie si renseignée (avec slash final pour éviter l'erreur 405)
+      if (!isNaN(g)) {
+        const resGluc = await fetch(`${API_URL}/api/glucose/`, {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify({
+            value_mgdl: g,
+            source: 'manuel',
+            measured_at: exactTimestamp,
+            note: note ? `Note : ${note}` : 'Saisie groupée'
+          })
+        });
+
+        if (!resGluc.ok) {
+          const errorData = await resGluc.json().catch(() => ({}));
+          const errorMsg = typeof errorData.detail === 'string' ? errorData.detail : JSON.stringify(errorData.detail || errorData);
+          throw new Error(errorMsg || `Erreur lors de l'enregistrement de la glycémie (${resGluc.status})`);
+        }
+      }
+
+      // 2. Enregistrement de l'insuline si renseignée (avec slash final pour éviter l'erreur 405)
+      if (!isNaN(u) && u > 0) {
+        const resIns = await fetch(`${API_URL}/api/insulin/`, {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify({
+            units: u,
+            kind: initialKind,
+            insulin_name: 'humalog',
+            injected_at: exactTimestamp,
+            note: note ? `Note : ${note}` : 'Saisie groupée'
+          })
+        });
+
+        if (!resIns.ok) {
+          const errorData = await resIns.json().catch(() => ({}));
+          const errorMsg = typeof errorData.detail === 'string' ? errorData.detail : JSON.stringify(errorData.detail || errorData);
+          throw new Error(errorMsg || `Erreur lors de l'enregistrement de l'insuline (${resIns.status})`);
+        }
+      }
+
+      Alert.alert('Succès', 'Données enregistrées avec succès !', [
+        {
+          text: 'OK',
+          onPress: () => {
+            // Navigation sécurisée (vérification que la route existe et n'est pas nulle)
+            if (router && typeof router.push === 'function') {
+              router.push('/journal');
+            }
+          }
+        }
+      ]);
+
+    } catch (err: any) {
+      console.error("Erreur synchrone/réseau détaillée :", err);
+      Alert.alert('Erreur', err?.message || "Impossible d'enregistrer les données.");
+    }
   };
 
   return (
-    <View style={styles.root}>
-      <KeyboardAwareScrollView contentContainerStyle={{ paddingTop: insets.top + 16, padding: 16, paddingBottom: insets.bottom + 24 }} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Injection d&apos;insuline</Text>
-        <Text style={styles.subtitle}>Suivez votre insuline lente et vos bolus hors repas</Text>
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Ajout combiné (Glycémie & Insuline)</Text>
 
-        <Card style={{ marginTop: 16 }} testID="insulin-kind-card">
-          <Text style={styles.label}>Type d&apos;insuline</Text>
-          <ChipRow>
-            {KINDS.map((k) => (
-              <Chip key={k.key} label={k.label} selected={kind === k.key} onPress={() => setKind(k.key)} testID={`insulin-kind-${k.key}`} />
-            ))}
-          </ChipRow>
-          <Text style={styles.hint}>{current.hint}</Text>
-        </Card>
+      <Text style={styles.label}>Glycémie (mg/dL)</Text>
+      <TextInput
+        style={styles.input}
+        keyboardType="numeric"
+        placeholder="Ex : 140"
+        value={glycemia}
+        onChangeText={setGlycemia}
+      />
 
-        <Card testID="insulin-form-card">
-          <TextField label="Dose" value={units} onChangeText={setUnits} placeholder={kind === "basale" && lastBasal ? String(round1(lastBasal.units)) : "Ex : 18"} keyboardType="decimal" suffix="U" big testID="insulin-units-input" />
-          {kind === "basale" && lastBasal ? (
-            <View style={styles.lastRow} testID="insulin-last-basal">
-              <Ionicons name="time-outline" size={14} color={colors.muted} />
-              <Text style={styles.lastText}>
-                Dernière basale : {round1(lastBasal.units)} U {lastBasal.insulin_name ? `(${lastBasal.insulin_name}) ` : ""}
-                · {formatDayLabel(lastBasal.injected_at).toLowerCase()} à {formatTime(lastBasal.injected_at)}
-              </Text>
-            </View>
-          ) : null}
-          <TextField label="Nom de l'insuline (optionnel)" value={name} onChangeText={setName} placeholder={kind === "basale" ? "Ex : Lantus" : "Ex : Novorapid"} testID="insulin-name-input" />
-          {kind === "basale" ? (
-            <ChipRow>
-              {BASAL_NAMES.map((n) => (
-                <Chip key={n} label={n} selected={name === n} onPress={() => setName(name === n ? "" : n)} testID={`insulin-name-${n}`} />
-              ))}
-            </ChipRow>
-          ) : null}
-          <View style={{ height: 8 }} />
-          <TextField label="Note (optionnel)" value={note} onChangeText={setNote} placeholder="Ex : injection cuisse gauche" testID="insulin-note-input" multiline />
-        </Card>
+      <Text style={styles.label}>Unités d'insuline (U)</Text>
+      <TextInput
+        style={styles.input}
+        keyboardType="numeric"
+        placeholder="Ex : 5.8"
+        value={units}
+        onChangeText={setUnits}
+      />
 
-        <PrimaryButton
-          label={valid ? `Enregistrer ${round1(parsed!)} U (${INSULIN_KIND_LABELS[kind].toLowerCase()})` : "Enregistrer"}
-          onPress={save}
-          loading={add.isPending}
-          disabled={!valid}
-          testID="insulin-save-button"
-        />
-      </KeyboardAwareScrollView>
-    </View>
+      <Text style={styles.label}>Note (optionnelle)</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Ex : Repas du midi"
+        value={note}
+        onChangeText={setNote}
+      />
+
+      <TouchableOpacity style={styles.saveButton} onPress={handleSaveSimultaneous}>
+        <Text style={styles.saveButtonText}>Enregistrer tout dans le journal</Text>
+      </TouchableOpacity>
+    </ScrollView>
   );
 }
 
-const useStyles = makeStyles((colors) => ({
-  root: {
-    flex: 1,
-    backgroundColor: colors.surface,
+const styles = StyleSheet.create({
+  container: { padding: 20, backgroundColor: '#f8fafc', flexGrow: 1 },
+  title: { fontSize: 22, fontWeight: 'bold', color: '#0f172a', marginBottom: 20 },
+  label: { fontSize: 14, fontWeight: '600', color: '#475569', marginBottom: 8, marginTop: 12 },
+  input: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 16,
   },
-  title: {
-    color: colors.onSurface,
-    fontSize: 22,
-    fontWeight: "500",
+  saveButton: {
+    backgroundColor: '#0284c7',
+    borderRadius: 10,
+    padding: 15,
+    alignItems: 'center',
+    marginTop: 24,
   },
-  subtitle: {
-    color: colors.muted,
-    fontSize: 13,
-    marginTop: 4,
-  },
-  label: {
-    color: colors.onSurfaceSecondary,
-    fontSize: 13,
-    fontWeight: "500",
-    marginBottom: 8,
-  },
-  hint: {
-    color: colors.muted,
-    fontSize: 12,
-    marginTop: 10,
-    lineHeight: 17,
-  },
-  lastRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 10,
-  },
-  lastText: {
-    flex: 1,
-    color: colors.muted,
-    fontSize: 12,
-  },
-}));
+  saveButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+});

@@ -1,14 +1,33 @@
 import { useState } from "react";
-import { Platform, Text, View } from "react-native";
+import { Platform, Text, View, TouchableOpacity } from "react-native";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { router } from "expo-router";
-import Ionicons from "@react-native-vector-icons/ionicons";
+import { Ionicons } from "@expo/vector-icons";
 
 import { makeStyles, useTheme } from "@/src/theme";
-import { reportAuthHeaders, reportUrl, useProfile, useSendReportEmail } from "@/src/api";
-import { Card, Chip, ChipRow, PrimaryButton } from "@/src/components/ui";
+import * as ApiModule from "@/src/api";
+import * as UIModule from "@/src/components/ui";
 import { useToast } from "@/src/components/Toast";
+
+// --- SÉCURISATION DES IMPORTS (Fallbacks anti-crash) ---
+const Card = (UIModule as any).Card || (({ children, style }: any) => <View style={style}>{children}</View>);
+const Chip = (UIModule as any).Chip || (({ label, onPress }: any) => <TouchableOpacity onPress={onPress}><Text>{label}</Text></TouchableOpacity>);
+const ChipRow = (UIModule as any).ChipRow || (({ children }: any) => <View style={{ flexDirection: "row", gap: 8 }}>{children}</View>);
+const PrimaryButton = (UIModule as any).PrimaryButton || (({ label, onPress, loading }: any) => (
+  <TouchableOpacity onPress={onPress}><Text>{loading ? "Chargement..." : label}</Text></TouchableOpacity>
+));
+
+const reportUrl = (ApiModule as any).reportUrl || ((days: number) => `/api/report?days=${days}`);
+const reportAuthHeaders = (ApiModule as any).reportAuthHeaders || (async () => ({}));
+const useProfile = (ApiModule as any).useProfile || (() => ({ data: null }));
+const useSendReportEmail = (ApiModule as any).useSendReportEmail || (() => ({
+  mutate: (_days: number, options?: { onSuccess?: (d: any) => void; onError?: (e: any) => void }) => {
+    options?.onError?.(new Error("L'envoi par e-mail n'est pas configuré."));
+  },
+  isPending: false,
+}));
+// --------------------------------------------------------
 
 const PERIODS = [
   { days: 14, label: "14 jours" },
@@ -73,12 +92,12 @@ export function DoctorReport() {
   const emailDoctor = () => {
     if (!doctorEmail) {
       toast.show("Renseignez l'e-mail de votre diabétologue dans votre profil", "error");
-      router.push("/profil");
+      router.push("/profil" as any);
       return;
     }
     sendEmail.mutate(days, {
-      onSuccess: (d) => toast.show(`Rapport envoyé à ${d.to}`, "success"),
-      onError: (e) => toast.show(e.message, "error"),
+      onSuccess: (d: any) => toast.show(`Rapport envoyé à ${d?.to || doctorEmail}`, "success"),
+      onError: (e: any) => toast.show(e?.message || "Erreur lors de l'envoi", "error"),
     });
   };
 

@@ -1,25 +1,86 @@
-import React, { useState } from 'react';
-import { synchroniserCapteurCGM } from './api';
+const API_URL = "https://insuline-backend.onrender.com/api/analyser_repas";
+const BASE_URL = "http://localhost:8000/api";
 
-// À insérer dans ton composant (ex. Dashboard / Accueil)
-const [loadingSync, setLoadingSync] = useState(false);
-
-const handleSync = async () => {
-  setLoadingSync(true);
+async function lireJsonSecurise(response) {
+  const texte = await response.text();
   try {
-    const data = await synchroniserCapteurCGM();
-    
-    // Notification de succès avec le nombre de mesures
-    alert(`Synchronisation réussie ! ${data?.inserted || 0} nouvelle(s) mesure(s) importée(s).`);
-
-    // Rafraîchit l'affichage des graphiques et données du tableau de bord
-    if (typeof window !== 'undefined') {
-      window.location.reload();
-    }
-  } catch (err) {
-    alert(`Échec : ${err.message}`);
-    console.error("Erreur synchronisation CGM :", err);
-  } finally {
-    setLoadingSync(false);
+    return JSON.parse(texte);
+  } catch {
+    return null;
   }
-};
+}
+
+export async function analyserRepasMobile(imageUri, ratioGlucides = 10.0) {
+  const formData = new FormData();
+
+  const filename = imageUri.split('/').pop();
+  const match = /\.(\w+)$/.exec(filename);
+  const type = match ? `image/${match[1]}` : `image/jpeg`;
+
+  formData.append('file', {
+    uri: imageUri,
+    name: filename,
+    type: type,
+  });
+
+  const response = await fetch(`${API_URL}?ratio_glucides=${ratioGlucides}`, {
+    method: 'POST',
+    body: formData,
+    headers: {
+      'Accept': 'application/json',
+    },
+  });
+
+  const data = await lireJsonSecurise(response);
+
+  if (!response.ok) {
+    throw new Error(data?.detail || `Erreur lors de l'analyse (code ${response.status})`);
+  }
+
+  if (!data) {
+    throw new Error("Réponse invalide du serveur d'analyse.");
+  }
+
+  return data;
+}
+
+export async function fetchProfile() {
+  const response = await fetch(`${BASE_URL}/profile`, {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+    },
+  });
+
+  const data = await lireJsonSecurise(response);
+
+  if (!response.ok) {
+    throw new Error(data?.detail || `Erreur lors de la récupération du profil (code ${response.status})`);
+  }
+
+  if (!data) {
+    throw new Error("Données de profil vides reçues du serveur.");
+  }
+
+  // Retourne l'objet profil de manière sécurisée sans ternaire redondant
+  return data.profile || data;
+}
+
+export async function saveProfile(profileData) {
+  const response = await fetch(`${BASE_URL}/profile`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify(profileData),
+  });
+
+  const data = await lireJsonSecurise(response);
+
+  if (!response.ok) {
+    throw new Error(data?.detail || `Erreur lors de la mise à jour du profil (code ${response.status})`);
+  }
+
+  return data || {};
+}
