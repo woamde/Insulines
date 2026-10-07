@@ -1,9 +1,8 @@
 fastapi
 uvicorn
-pydantic
 python-dotenv
+pydantic
 pymongo
-dnspython
 google-genai
 anthropic
 openai

@@ -1,5 +1,5 @@
 const API_URL = "https://insuline-backend.onrender.com/api/analyser_repas";
-const BASE_URL = "http://localhost:8000/api";
+const BASE_URL = "baseURL: 'https://glucosoin-api.onrender.com'";
 
 async function lireJsonSecurise(response) {
   const texte = await response.text();

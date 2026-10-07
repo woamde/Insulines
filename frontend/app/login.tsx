@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,21 +6,28 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
+import * as AuthSession from 'expo-auth-session';
 import { saveToken } from '../services/api';
 
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
   const router = useRouter();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  // Remplacez VOTRE_WEB_CLIENT_ID par l'identifiant de type "Application Web"
+  // Configuration OAuth avec calcul dynamique de la redirectUri
   const [request, response, promptAsync] = Google.useAuthRequest({
     webClientId: '903289007945-k1ttrrijqaflj368tc3ifkfdh7o8qooo.apps.googleusercontent.com',
     androidClientId: '903289007945-jejfgbb6l7srqpn1dm6fijur4p4apv6l.apps.googleusercontent.com',
+    redirectUri: AuthSession.makeRedirectUri({
+      preferLocalhost: true,
+    }),
   });
 
   useEffect(() => {
@@ -29,23 +36,34 @@ export default function LoginScreen() {
       if (authentication?.accessToken) {
         handleSaveAndRedirect(authentication.accessToken);
       }
+    } else if (response?.type === 'error') {
+      setErrorMessage('Échec de la connexion via Google.');
     }
   }, [response]);
 
   const handleSaveAndRedirect = async (token: string) => {
+    setLoading(true);
+    setErrorMessage(null);
+
     try {
       await saveToken(token);
       router.replace('/');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erreur de sauvegarde du jeton :', error);
-      Alert.alert('Erreur', 'Impossible d’enregistrer la session.');
+      const msg = 'Impossible d’enregistrer la session.';
+      setErrorMessage(msg);
+      if (Platform.OS !== 'web') {
+        Alert.alert('Erreur', msg);
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
+    setErrorMessage(null);
     try {
       const result = await promptAsync();
-      // Si Google renvoie une erreur (client non trouvé, annulé, etc.)
       if (result?.type === 'error' || result?.type === 'dismiss') {
         console.warn('Authentification Google interrompue, repli en mode dev.');
         await handleSaveAndRedirect('dev_google_token_12345');
@@ -67,6 +85,12 @@ export default function LoginScreen() {
         <Text style={styles.subtitle}>
           Votre suivi du diabète de type 1, en toute simplicité
         </Text>
+
+        {errorMessage && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>⚠️ {errorMessage}</Text>
+          </View>
+        )}
 
         <View style={styles.featuresList}>
           <View style={styles.featureItem}>
@@ -96,13 +120,13 @@ export default function LoginScreen() {
         </View>
 
         <TouchableOpacity
-          style={styles.googleButton}
+          style={[styles.googleButton, loading && styles.disabledButton]}
           onPress={handleGoogleLogin}
-          disabled={!request}
+          disabled={!request || loading}
           activeOpacity={0.8}
         >
-          {!request ? (
-            <ActivityIndicator color="#1C1C1E" />
+          {!request || loading ? (
+            <ActivityIndicator color="#007AFF" />
           ) : (
             <View style={styles.buttonContent}>
               <Text style={styles.googleIcon}>G</Text>
@@ -164,7 +188,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6E6E73',
     textAlign: 'center',
-    marginBottom: 28,
+    marginBottom: 20,
+  },
+  errorContainer: {
+    backgroundColor: '#FEE2E2',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    width: '100%',
+    marginBottom: 20,
+  },
+  errorText: {
+    color: '#DC2626',
+    fontSize: 13,
+    textAlign: 'center',
+    fontWeight: '500',
   },
   featuresList: {
     width: '100%',
@@ -194,6 +232,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
+  },
+  disabledButton: {
+    opacity: 0.7,
   },
   buttonContent: {
     flexDirection: 'row',

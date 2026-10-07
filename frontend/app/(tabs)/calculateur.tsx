@@ -1,192 +1,123 @@
-import { useMemo, useState } from "react";
-import { ScrollView, Text, TextInput, View, ActivityIndicator, TouchableOpacity } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
 
-import { useProfile } from "@/src/api";
-import { round1 } from "@/src/glucose";
-import { unitsFor } from "@/src/units";
-import { makeStyles, useTheme } from "@/src/theme";
-
-interface BolusParams {
-  readonly carbs: number;
-  readonly glucose: number | null;
-  readonly icRatio: number;
-  readonly isf: number;
-  readonly targetGlucose: number;
-}
-
-interface BolusResult {
-  readonly total: number;
-  readonly carbsDose: number;
-  readonly correctionDose: number;
-}
-
-function calculateBolus({
-  carbs,
-  glucose,
-  icRatio,
-  isf,
-  targetGlucose,
-}: BolusParams): BolusResult {
-  const carbsDose = icRatio > 0 ? carbs / icRatio : 0;
-  const correctionDose =
-    glucose !== null && isf > 0 ? (glucose - targetGlucose) / isf : 0;
-  const total = Math.max(0, carbsDose + correctionDose);
-
-  return { total, carbsDose, correctionDose };
-}
+const API_BASE_URL = 'http://127.0.0.1:8002/api';
 
 export default function CalculateurScreen() {
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
-  const styles = useStyles();
+  const [glycemia, setGlycemia] = useState<string>('');
+  const [carbs, setCarbs] = useState<string>('');
+  const [target, setTarget] = useState<string>('100');
+  const [icRatio, setIcRatio] = useState<string>('10'); // 1 U pour X grammes de glucides
+  const [isf, setIsf] = useState<string>('40');         // 1 U fait baisser la glycémie de X mg/dL
+  const [result, setResult] = useState<{ mealBolus: number; correctionBolus: number; totalBolus: number } | null>(null);
 
-  const profile = useProfile();
-  const units = unitsFor(profile.data?.glucose_unit);
+  useEffect(() => {
+    // Chargement des paramètres du profil utilisateur
+    fetch(`${API_BASE_URL}/profile`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.ic_ratio) setIcRatio(String(data.ic_ratio));
+        if (data.isf) setIsf(String(data.isf));
+        if (data.target_glycemia) setTarget(String(data.target_glycemia));
+      })
+      .catch(() => {});
+  }, []);
 
-  const [carbsInput, setCarbsInput] = useState("");
-  const [glucoseInput, setGlucoseInput] = useState("");
+  const handleCalculate = () => {
+    const g = parseFloat(glycemia);
+    const c = parseFloat(carbs) || 0;
+    const t = parseFloat(target) || 100;
+    const ratio = parseFloat(icRatio);
+    const sens = parseFloat(isf);
 
-  const carbs = Number.parseFloat(carbsInput.replace(",", ".")) || 0;
-  const glucoseVal = Number.parseFloat(glucoseInput.replace(",", ".")) || null;
+    if (isNaN(g) || isNaN(ratio) || isNaN(sens) || ratio <= 0 || sens <= 0) {
+      Alert.alert('Erreur', 'Veuillez renseigner au moins une glycémie valide et des ratios corrects.');
+      return;
+    }
 
-  const isMmol = profile.data?.glucose_unit === "mmol";
+    // Calcul du bolus pour le repas
+    const mealBolus = c > 0 ? c / ratio : 0;
 
-  const glucoseMgDl = useMemo(() => {
-    if (glucoseVal === null) return null;
-    return isMmol ? glucoseVal * 18.0182 : glucoseVal;
-  }, [glucoseVal, isMmol]);
+    // Calcul du bolus de correction
+    const correctionBolus = (g - t) / sens;
 
-  const bolusResult = useMemo(() => {
-    if (!profile.data?.ic_ratio || !profile.data?.isf) return null;
+    // Bolus total (arrondi au dixième, minimum 0)
+    const rawTotal = mealBolus + correctionBolus;
+    const totalBolus = rawTotal > 0 ? Math.round(rawTotal * 10) / 10 : 0;
 
-    return calculateBolus({
-      carbs,
-      glucose: glucoseMgDl,
-      icRatio: profile.data.ic_ratio,
-      isf: profile.data.isf,
-      targetGlucose: profile.data.target_glucose ?? 100,
+    setResult({
+      mealBolus: Math.round(mealBolus * 10) / 10,
+      correctionBolus: Math.round(correctionBolus * 10) / 10,
+      totalBolus,
     });
-  }, [carbs, glucoseMgDl, profile.data]);
-
-  if (profile.isLoading) {
-    return (
-      <View style={[styles.root, styles.centerContainer, { paddingTop: insets.top + 16 }]}>
-        <ActivityIndicator size="large" color={colors.brandPrimary} />
-        <Text style={[styles.subtitle, { marginTop: 12 }]}>Chargement de vos paramètres...</Text>
-      </View>
-    );
-  }
-
-  if (!profile.data?.ic_ratio || !profile.data?.isf) {
-    return (
-      <View style={[styles.root, { paddingTop: insets.top + 16, paddingHorizontal: 16 }]}>
-        <View style={styles.card}>
-          <View style={styles.emptyStateContainer}>
-            <Ionicons name="calculator-outline" size={48} color={colors.brandPrimary} />
-            <Text style={styles.emptyTitle}>Profil incomplet</Text>
-            <Text style={styles.emptyMessage}>
-              Veuillez configurer votre ratio insuline/glucides et votre facteur de sensibilité dans votre profil pour utiliser le calculateur.
-            </Text>
-          </View>
-          <View style={styles.actionSpacing}>
-            <TouchableOpacity
-              style={[styles.primaryButton, { backgroundColor: colors.brandPrimary }]}
-              onPress={() => router.push("/profil")}
-            >
-              <Text style={styles.primaryButtonText}>Configurer mon profil</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    );
-  }
+  };
 
   return (
-    <ScrollView
-      style={styles.root}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 24 },
-      ]}
-      keyboardShouldPersistTaps="handled"
-    >
+    <ScrollView style={styles.container}>
       <Text style={styles.title}>Calculateur de Bolus</Text>
-      <Text style={styles.subtitle}>
-        Ratio : 1 U pour {profile.data.ic_ratio} g · Cible : {units.fmt(profile.data.target_glucose ?? 100)} {units.label}
-      </Text>
 
       <View style={styles.card}>
-        <Text style={styles.inputLabel}>Glucides du repas (g)</Text>
+        <Text style={styles.label}>Glycémie actuelle (mg/dL)</Text>
         <TextInput
-          style={styles.textInput}
-          value={carbsInput}
-          onChangeText={setCarbsInput}
-          keyboardType="decimal-pad"
-          placeholder="ex: 45"
-          placeholderTextColor={colors.muted}
+          style={styles.input}
+          keyboardType="numeric"
+          placeholder="Ex : 180"
+          value={glycemia}
+          onChangeText={setGlycemia}
         />
 
-        <View style={styles.inputSpacing}>
-          <Text style={styles.inputLabel}>{`Glycémie actuelle (${units.label}) — optionnel`}</Text>
-          <TextInput
-            style={styles.textInput}
-            value={glucoseInput}
-            onChangeText={setGlucoseInput}
-            keyboardType="decimal-pad"
-            placeholder={isMmol ? "ex: 7.2" : "ex: 130"}
-            placeholderTextColor={colors.muted}
-          />
+        <Text style={styles.label}>Glucides du repas (g)</Text>
+        <TextInput
+          style={styles.input}
+          keyboardType="numeric"
+          placeholder="Ex : 45"
+          value={carbs}
+          onChangeText={setCarbs}
+        />
+
+        <View style={styles.row}>
+          <View style={styles.halfField}>
+            <Text style={styles.subLabel}>Cible (mg/dL)</Text>
+            <TextInput
+              style={styles.smallInput}
+              keyboardType="numeric"
+              value={target}
+              onChangeText={setTarget}
+            />
+          </View>
+          <View style={styles.halfField}>
+            <Text style={styles.subLabel}>Ratio (g/U)</Text>
+            <TextInput
+              style={styles.smallInput}
+              keyboardType="numeric"
+              value={icRatio}
+              onChangeText={setIcRatio}
+            />
+          </View>
+          <View style={styles.halfField}>
+            <Text style={styles.subLabel}>ISF (mg/dL/U)</Text>
+            <TextInput
+              style={styles.smallInput}
+              keyboardType="numeric"
+              value={isf}
+              onChangeText={setIsf}
+            />
+          </View>
         </View>
+
+        <TouchableOpacity style={styles.button} onPress={handleCalculate}>
+          <Text style={styles.buttonText}>Calculer la dose</Text>
+        </TouchableOpacity>
       </View>
 
-      {bolusResult && (
-        <View style={styles.resultContainer}>
-          <View style={styles.card}>
-            <Text style={styles.resultTitle}>Suggestion de Dose</Text>
-            <View style={styles.totalRow}>
-              <Text style={styles.totalValue}>{round1(bolusResult.total)}</Text>
-              <Text style={styles.totalUnit}>Unités (U)</Text>
-            </View>
+      {result && (
+        <View style={styles.resultCard}>
+          <Text style={styles.resultTitle}>Dose recommandée</Text>
+          <Text style={styles.totalValue}>{result.totalBolus} U</Text>
 
-            <View style={styles.tilesRow}>
-              <View style={[styles.statTile, { backgroundColor: colors.surfaceSecondary }]}>
-                <Text style={styles.statTileLabel}>Repas</Text>
-                <Text style={[styles.statTileValue, { color: colors.brandPrimary }]}>
-                  {round1(bolusResult.carbsDose)} U
-                </Text>
-              </View>
-              <View style={[styles.statTile, { backgroundColor: colors.surfaceSecondary }]}>
-                <Text style={styles.statTileLabel}>Correction</Text>
-                <Text style={[styles.statTileValue, { color: bolusResult.correctionDose < 0 ? colors.warning : colors.info }]}>
-                  {round1(bolusResult.correctionDose)} U
-                </Text>
-              </View>
-            </View>
-
-            <Text style={styles.disclaimer}>
-              Ce calcul est une aide au dosage basée sur vos paramètres. Adaptez toujours la dose selon votre analyse et l&apos;avis de votre médecin.
-            </Text>
-
-            <View style={styles.actionSpacing}>
-              <TouchableOpacity
-                style={[styles.primaryButton, { backgroundColor: colors.brandPrimary }]}
-                onPress={() =>
-                  router.push({
-                    pathname: "/ajouter-insuline",
-                    params: {
-                      units: String(round1(bolusResult.total)),
-                      kind: "repas",
-                    },
-                  })
-                }
-              >
-                <Text style={styles.primaryButtonText}>Enregistrer cette injection</Text>
-              </TouchableOpacity>
-            </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailText}>Bolus Repas : {result.mealBolus} U</Text>
+            <Text style={styles.detailText}>Correction : {result.correctionBolus > 0 ? `+${result.correctionBolus}` : result.correctionBolus} U</Text>
           </View>
         </View>
       )}
@@ -194,138 +125,21 @@ export default function CalculateurScreen() {
   );
 }
 
-const useStyles = makeStyles((colors) => ({
-  root: {
-    flex: 1,
-    backgroundColor: colors.surface,
-  },
-  centerContainer: {
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  content: {
-    paddingHorizontal: 16,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: colors.onSurface,
-  },
-  subtitle: {
-    fontSize: 13,
-    color: colors.muted,
-    marginTop: 4,
-    marginBottom: 16,
-  },
-  card: {
-    backgroundColor: colors.surfaceSecondary || colors.surface,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.divider,
-    marginBottom: 16,
-  },
-  emptyStateContainer: {
-    alignItems: "center",
-    paddingVertical: 20,
-    paddingHorizontal: 10,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: colors.onSurface,
-    marginTop: 12,
-  },
-  emptyMessage: {
-    textAlign: "center",
-    color: colors.muted,
-    marginTop: 6,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: colors.onSurface,
-    marginBottom: 6,
-  },
-  textInput: {
-    height: 48,
-    borderWidth: 1,
-    borderColor: colors.divider,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    fontSize: 16,
-    color: colors.onSurface,
-    backgroundColor: colors.surface,
-  },
-  inputSpacing: {
-    marginTop: 16,
-  },
-  resultContainer: {
-    marginTop: 8,
-  },
-  resultTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: colors.onSurface,
-    marginBottom: 8,
-  },
-  totalRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: 8,
-    marginVertical: 12,
-  },
-  totalValue: {
-    fontSize: 48,
-    fontWeight: "bold",
-    color: colors.brandPrimary,
-  },
-  totalUnit: {
-    fontSize: 18,
-    fontWeight: "500",
-    color: colors.muted,
-  },
-  tilesRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginVertical: 12,
-  },
-  statTile: {
-    flex: 1,
-    padding: 12,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  statTileLabel: {
-    fontSize: 12,
-    color: colors.muted,
-    marginBottom: 4,
-  },
-  statTileValue: {
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  disclaimer: {
-    fontSize: 12,
-    color: colors.muted,
-    marginTop: 12,
-    lineHeight: 16,
-  },
-  actionSpacing: {
-    marginTop: 16,
-  },
-  primaryButton: {
-    height: 48,
-    borderRadius: 8,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-}));
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff', padding: 20, paddingTop: 60 },
+  title: { fontSize: 22, fontWeight: 'bold', marginBottom: 20 },
+  card: { backgroundColor: '#f9f9f9', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#eee' },
+  label: { fontSize: 14, fontWeight: '600', marginTop: 10, marginBottom: 4 },
+  subLabel: { fontSize: 11, color: '#666', marginBottom: 4 },
+  input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, fontSize: 16 },
+  row: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  halfField: { flex: 1 },
+  smallInput: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 8, fontSize: 14, textAlign: 'center' },
+  button: { backgroundColor: '#007aff', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 18 },
+  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  resultCard: { backgroundColor: '#e3f2fd', padding: 20, borderRadius: 12, marginTop: 20, alignItems: 'center' },
+  resultTitle: { fontSize: 14, color: '#1565c0', fontWeight: '600' },
+  totalValue: { fontSize: 36, fontWeight: 'bold', color: '#0d47a1', my: 8 },
+  detailRow: { flexDirection: 'row', gap: 16, marginTop: 8 },
+  detailText: { fontSize: 13, color: '#1565c0' },
+});

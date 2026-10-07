@@ -70,14 +70,25 @@ export default function Profil() {
       const p = profile.data;
       const u: GlucoseUnit = p.glucose_unit === "mmol" ? "mmol" : "mgdl";
       setUnit(u);
-      setName(p.name === "Profil" ? "" : p.name);
+
+      const profileName = p.first_name || p.prenom || (p.name !== "Profil" ? p.name : "") || "";
+      setName(profileName);
+
       setAge(p.age != null ? String(p.age) : "");
       setHeight(p.height_cm != null ? String(round1(p.height_cm)) : "");
       setWeight(p.weight_kg != null ? String(round1(p.weight_kg)) : "");
       setDiabetesYears(p.diabetes_years != null ? String(round1(p.diabetes_years)) : "");
-      setIc(String(p.ic_ratio));
-      setIsf(show(p.isf, u));
-      setTarget(show(p.target_glucose, u));
+      setIc(p.ic_ratio != null ? String(p.ic_ratio) : "");
+      
+      if (p.isf != null) {
+        setIsf(show(p.isf, u));
+      }
+
+      const targetVal = p.target_glucose ?? p.target_glycemia;
+      if (targetVal != null) {
+        setTarget(show(targetVal, u));
+      }
+
       setTargetLow(show(p.target_low ?? 70, u));
       setTargetHigh(show(p.target_high ?? 180, u));
       setTirGoal(String(p.tir_goal ?? 70));
@@ -90,10 +101,12 @@ export default function Profil() {
     const icValue = parseNum(ic);
     const isfTyped = parseNum(isf);
     const targetTyped = parseNum(target);
+
     if (!icValue || icValue <= 0 || !isfTyped || isfTyped <= 0 || !targetTyped || targetTyped <= 0) {
       toast.show("Renseignez un ratio I/C, un ISF et une cible supérieurs à 0", "error");
       return;
     }
+
     const isfValue = units.toMgdl(isfTyped);
     const targetValue = units.toMgdl(targetTyped);
     const lowTyped = parseNum(targetLow);
@@ -106,25 +119,31 @@ export default function Profil() {
       toast.show(`Plage cible invalide : la borne basse doit être inférieure à la borne haute (${units.fmt(40)}–${units.fmt(300)} ${units.label})`, "error");
       return;
     }
+
     if (!(goalValue > 0 && goalValue <= 100)) {
       toast.show("L'objectif de temps dans la cible doit être entre 1 et 100 %", "error");
       return;
     }
+
     const emailValue = doctorEmail.trim();
     if (emailValue && !/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(emailValue)) {
       toast.show("Adresse e-mail du médecin invalide", "error");
       return;
     }
 
+    const profileName = name.trim() || "Profil";
+
     save.mutate(
       {
+        name: profileName,
+        first_name: profileName,
+        prenom: profileName,
         target_low: lowValue,
         target_high: highValue,
         tir_goal: goalValue,
         doctor_name: doctorName.trim(),
         doctor_email: emailValue,
         glucose_unit: unit,
-        name: name.trim() || "Profil",
         age: parseNum(age),
         height_cm: parseNum(height),
         weight_kg: parseNum(weight),
@@ -132,6 +151,7 @@ export default function Profil() {
         ic_ratio: icValue,
         isf: isfValue,
         target_glucose: targetValue,
+        target_glycemia: targetValue,
         profile_completed: true,
       },
       {
@@ -139,7 +159,7 @@ export default function Profil() {
           toast.show("Profil enregistré", "success");
           handleBack();
         },
-        onError: (e) => toast.show(e.message, "error"),
+        onError: (e) => toast.show(e.message || "Erreur de sauvegarde", "error"),
       },
     );
   };

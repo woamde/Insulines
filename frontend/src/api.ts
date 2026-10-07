@@ -1,145 +1,134 @@
-// src/api.ts
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-// ==========================================
-// 1. IMPORT LIBREVIEW
-// ==========================================
-export interface ImportResult {
-  readings_parsed: number;
-  readings_inserted: number;
-  insulin_inserted: number;
-  meals_inserted: number;
-  skipped: number;
-}
+const TOKEN_KEY = 'user_token';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8002/api';
 
-export async function importLibreviewBatch(
-  lines: string[],
-  batchIndex: number
-): Promise<ImportResult> {
-  const response = await fetch("http://localhost:8000/api/import/libreview", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ lines, batchIndex }),
+// --- Stockage du Token ---
+
+export const saveToken = async (token: string): Promise<void> => {
+  if (Platform.OS === 'web') {
+    try {
+      localStorage.setItem(TOKEN_KEY, token);
+    } catch (error) {
+      console.error('Erreur localStorage :', error);
+    }
+  } else {
+    await SecureStore.setItemAsync(TOKEN_KEY, token);
+  }
+};
+
+export const getToken = async (): Promise<string | null> => {
+  if (Platform.OS === 'web') {
+    try {
+      return localStorage.getItem(TOKEN_KEY);
+    } catch (error) {
+      return null;
+    }
+  } else {
+    return await SecureStore.getItemAsync(TOKEN_KEY);
+  }
+};
+
+export const removeToken = async (): Promise<void> => {
+  if (Platform.OS === 'web') {
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+    } catch (error) {
+      console.error('Erreur suppression localStorage :', error);
+    }
+  } else {
+    await SecureStore.deleteItemAsync(TOKEN_KEY);
+  }
+};
+
+// --- Client HTTP ---
+
+export const apiFetch = async (endpoint: string, options: RequestInit = {}): Promise<any> => {
+  const token = await getToken();
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> || {}),
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const cleanBase = API_BASE_URL.replace(/\/$/, '');
+  const cleanEndpoint = endpoint.replace(/^\//, '');
+  const url = `${cleanBase}/${cleanEndpoint}`;
+
+  const response = await fetch(url, {
+    ...options,
+    headers,
   });
-  if (!response.ok) throw new Error("Erreur lors de l'importation du lot LibreView");
-  return response.json();
-}
 
-// ==========================================
-// 2. PROFIL UTILISATEUR
-// ==========================================
-export interface Profile {
-  name?: string;
-  email?: string;
-  [key: string]: any;
-}
+  const data = await response.json().catch(() => ({}));
 
-export function useProfile() {
-  return useQuery({
-    queryKey: ["profile"],
-    queryFn: async (): Promise<Profile> => {
-      const response = await fetch("http://localhost:8000/api/profile");
-      if (!response.ok) throw new Error("Impossible de récupérer le profil");
-      return response.json();
-    },
-  });
-}
+  if (!response.ok) {
+    throw new Error(data.detail || data.message || `Erreur serveur (${response.status})`);
+  }
 
-export function useSaveProfile() {
+  return data;
+};
+
+// --- Profil Utilisateur ---
+
+export const fetchUserProfile = async () => apiFetch('/user/profile');
+
+export const updateUserProfile = async (data: any) =>
+  apiFetch('/user/profile', { method: 'PUT', body: JSON.stringify(data) });
+
+export const useProfile = () =>
+  useQuery({ queryKey: ['userProfile'], queryFn: fetchUserProfile });
+
+export const useSaveProfile = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (profileData: Profile) => {
-      const response = await fetch("http://localhost:8000/api/profile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(profileData),
-      });
-      if (!response.ok) throw new Error("Erreur lors de la sauvegarde du profil");
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["profile"] });
-    },
+    mutationFn: updateUserProfile,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['userProfile'] }),
   });
-}
+};
 
-// ==========================================
-// 3. GLYCÉMIE & STATS
-// ==========================================
-export function useGlucose(limit?: number) {
-  return useQuery({
-    queryKey: ["glucose", limit],
-    queryFn: async () => {
-      const url = limit ? `http://localhost:8000/api/glucose?limit=${limit}` : "http://localhost:8000/api/glucose";
-      const response = await fetch(url);
-      if (!response.ok) throw new Error("Impossible de récupérer les glycémies");
-      return response.json();
-    },
+// --- CGM / LibreLinkUp ---
+
+export const testCgmConnection = async (credentials: { email: string; password: string }) => {
+  return await apiFetch('/cgm/test', {
+    method: 'POST',
+    body: JSON.stringify(credentials),
   });
-}
+};
 
-export function useStats() {
-  return useQuery({
-    queryKey: ["stats"],
-    queryFn: async () => {
-      const response = await fetch("http://localhost:8000/api/stats");
-      if (!response.ok) throw new Error("Impossible de récupérer les statistiques");
-      return response.json();
-    },
+export const saveCgmConfig = async (credentials: { email: string; password: string }) => {
+  return await apiFetch('/cgm/settings', {
+    method: 'POST',
+    body: JSON.stringify(credentials),
   });
-}
+};
 
-// ==========================================
-// 4. SUIVI DU POIDS (AVEC TOUS LES ALIAS)
-// ==========================================
-export function useWeightHistory() {
-  return useQuery({
-    queryKey: ["weight"],
-    queryFn: async () => {
-      const response = await fetch("http://localhost:8000/api/weight");
-      if (!response.ok) throw new Error("Impossible de récupérer l'historique du poids");
-      return response.json();
-    },
-  });
-}
+export const saveCgmSettings = saveCgmConfig;
 
-// Alias pour compatibilité avec ajouter-insuline.tsx ou autres écrans
-export function useWeights() {
-  return useWeightHistory();
-}
+export const useTestCgm = () => useMutation({ mutationFn: testCgmConnection });
+export const useSaveCgm = () => useMutation({ mutationFn: saveCgmConfig });
 
-export function useAddWeight() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (weightData: { weight_kg: number; date?: string }) => {
-      const response = await fetch("http://localhost:8000/api/weight", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(weightData),
-      });
-      if (!response.ok) throw new Error("Erreur lors de l'enregistrement du poids");
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["weight"] });
-      queryClient.invalidateQueries({ queryKey: ["profile"] });
-    },
-  });
-}
+// Export par défaut de sécurité
+const api = {
+  saveToken,
+  getToken,
+  removeToken,
+  apiFetch,
+  fetchUserProfile,
+  updateUserProfile,
+  useProfile,
+  useSaveProfile,
+  testCgmConnection,
+  saveCgmConfig,
+  saveCgmSettings,
+  useTestCgm,
+  useSaveCgm,
+};
 
-export function useDeleteWeight() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (weightId: string | number) => {
-      const response = await fetch(`http://localhost:8000/api/weight/${weightId}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) throw new Error("Erreur lors de la suppression du poids");
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["weight"] });
-      queryClient.invalidateQueries({ queryKey: ["profile"] });
-    },
-  });
-}
+export default api;

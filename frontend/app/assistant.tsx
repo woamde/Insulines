@@ -1,239 +1,358 @@
-import { useEffect, useRef, useState } from "react";
-import { FlatList, Platform, Pressable, Text, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
-import { KeyboardAvoidingView, KeyboardStickyView } from "react-native-keyboard-controller";
-import Ionicons from "@react-native-vector-icons/ionicons";
+import React, { useState, useRef } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 
-import { makeStyles, useTheme } from "@/src/theme";
-import { useAiChat, useAiMessages, useAiModels, useClearAiMessages, type AiMessage } from "@/src/api";
-import { Chip, ChipRow, LoadingState } from "@/src/components/ui";
-import { useToast } from "@/src/components/Toast";
+interface Message {
+  id: string;
+  sender: 'user' | 'assistant';
+  text: string;
+  model?: string;
+}
 
-const SUGGESTIONS = [
-  "Combien de glucides dans une part de pizza ?",
-  "Quels aliments font peu monter la glycémie ?",
-  "Comment gérer une hypo pendant le sport ?",
-];
+type ModelType = 'gpt' | 'claude' | 'gemini';
 
-export default function Assistant() {
-  const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
-  const styles = useStyles();
-  const toast = useToast();
+// Utilisation de la variable d'environnement pour cibler le backend Render
+const API_URL = `${process.env.EXPO_PUBLIC_API_URL}/ai/chat`;
 
-  const models = useAiModels();
-  const messages = useAiMessages();
-  const chat = useAiChat();
-  const clear = useClearAiMessages();
+export default function AssistantScreen() {
+  const [selectedModel, setSelectedModel] = useState<ModelType>('gemini');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
 
-  const [model, setModel] = useState<string>("");
-  const [text, setText] = useState("");
-  const listRef = useRef<FlatList<AiMessage>>(null);
+  const modelLabels: Record<ModelType, string> = {
+    gpt: 'GPT-4o',
+    claude: 'Claude 3.5',
+    gemini: 'gemini-3.6-flash-lite',
+  };
 
-  useEffect(() => {
-    if (models.data && !model) setModel(models.data.default);
-  }, [models.data, model]);
+  const sendMessage = async (textToSend?: string) => {
+    const text = (textToSend || input).trim();
+    if (!text || loading) return;
 
-  const data = messages.data ?? [];
-  const pending: AiMessage[] = chat.isPending && chat.variables ? [{ role: "user", content: chat.variables.message }] : [];
-  const allMessages = [...data, ...pending];
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      sender: 'user',
+      text,
+    };
 
-  useEffect(() => {
-    if (allMessages.length) {
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+    setMessages((prev) => [...prev, userMsg]);
+    if (!textToSend) setInput('');
+    setLoading(true);
+
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          message: text,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || `Erreur serveur (${response.status})`);
+      }
+
+      const assistantMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        sender: 'assistant',
+        text: data.reply,
+        model: modelLabels[selectedModel],
+      };
+
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (error: any) {
+      const errorMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        sender: 'assistant',
+        text: `⚠️ Erreur : ${error.message || 'Impossible de contacter le serveur.'}`,
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    } finally {
+      setLoading(false);
     }
-  }, [allMessages.length]);
-
-  const send = (msg?: string) => {
-    const message = (msg ?? text).trim();
-    if (!message || chat.isPending || !model) return;
-    setText("");
-    chat.mutate({ message, model }, { onError: (e) => toast.show(e.message, "error") });
   };
 
   return (
-    <View style={styles.root}>
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Pressable onPress={() => router.back()} style={styles.iconBtn} testID="assistant-back-button" accessibilityRole="button">
-          <Ionicons name="chevron-back" size={24} color={colors.onSurface} />
-        </Pressable>
-        <View style={styles.headerTitle}>
-          <Text style={styles.title}>Assistant IA</Text>
-          <Text style={styles.subtitle}>Conseils diabète · glucides</Text>
-        </View>
-        <Pressable
-          onPress={() => clear.mutate(undefined, { onSuccess: () => toast.show("Conversation effacée", "success") })}
-          style={styles.iconBtn}
-          testID="assistant-clear-button"
-          accessibilityRole="button"
-        >
-          <Ionicons name="trash-outline" size={20} color={colors.muted} />
-        </Pressable>
-      </View>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={90}
+    >
+      <View style={styles.header}>
+        <Text style={styles.title}>Assistant GlycoSoin</Text>
 
-      <View style={styles.modelRow}>
-        <ChipRow>
-          {(models.data?.models ?? []).map((m) => (
-            <Chip key={m.key} label={m.label} selected={model === m.key} onPress={() => setModel(m.key)} testID={`ai-model-${m.key}`} />
+        {/* Sélecteur des 3 modèles */}
+        <View style={styles.modelSelector}>
+          {(['gpt', 'claude', 'gemini'] as ModelType[]).map((m) => (
+            <TouchableOpacity
+              key={m}
+              style={[
+                styles.modelTab,
+                selectedModel === m && styles.modelTabActive,
+              ]}
+              onPress={() => setSelectedModel(m)}
+            >
+              <Text
+                style={[
+                  styles.modelTabText,
+                  selectedModel === m && styles.modelTabTextActive,
+                ]}
+              >
+                {modelLabels[m]}
+              </Text>
+            </TouchableOpacity>
           ))}
-        </ChipRow>
+        </View>
       </View>
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={0}
+      <ScrollView
+        ref={scrollViewRef}
+        style={styles.chatContainer}
+        contentContainerStyle={styles.chatContent}
+        onContentSizeChange={() =>
+          scrollViewRef.current?.scrollToEnd({ animated: true })
+        }
       >
-        {messages.isLoading ? (
-          <LoadingState label="Chargement…" />
-        ) : allMessages.length === 0 ? (
-          <View style={styles.empty}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="sparkles" size={30} color={colors.onBrandTertiary} />
-            </View>
-            <Text style={styles.emptyTitle}>Posez votre question</Text>
-            <Text style={styles.emptyText}>Glucides d&apos;un plat, conseils alimentaires, gestion du diabète…</Text>
-            <View style={styles.suggestions}>
-              {SUGGESTIONS.map((s) => (
-                <Pressable key={s} style={styles.suggestion} onPress={() => send(s)} testID="ai-suggestion">
-                  <Text style={styles.suggestionText}>{s}</Text>
-                </Pressable>
-              ))}
-            </View>
+        {messages.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptySubtitle}>
+              Pose tes questions sur le calcul des glucides, l'insuline ou ton suivi glycémique.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.chip}
+              onPress={() => sendMessage('Bolus pour 60g de glucides ?')}
+            >
+              <Text style={styles.chipText}>Bolus pour 60g de glucides ?</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.chip}
+              onPress={() => sendMessage('Analyser ma glycémie')}
+            >
+              <Text style={styles.chipText}>Analyser ma glycémie</Text>
+            </TouchableOpacity>
           </View>
         ) : (
-          <FlatList
-            ref={listRef}
-            data={allMessages}
-            keyExtractor={(_, i) => String(i)}
-            contentContainerStyle={styles.messages}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            renderItem={({ item }) => (
-              <View style={[styles.bubbleRow, item.role === "user" ? styles.bubbleRowUser : styles.bubbleRowAi]}>
-                <View style={[styles.bubble, item.role === "user" ? styles.bubbleUser : styles.bubbleAi]}>
-                  <Text style={[styles.bubbleText, item.role === "user" && styles.bubbleTextUser]}>{item.content}</Text>
-                </View>
-              </View>
-            )}
-            ListFooterComponent={
-              chat.isPending ? (
-                <View style={[styles.bubbleRow, styles.bubbleRowAi]}>
-                  <View style={[styles.bubble, styles.bubbleAi]}>
-                    <Text style={styles.typing}>L&apos;assistant réfléchit…</Text>
-                  </View>
-                </View>
-              ) : null
-            }
-          />
+          messages.map((msg) => (
+            <View
+              key={msg.id}
+              style={[
+                styles.bubble,
+                msg.sender === 'user' ? styles.userBubble : styles.assistantBubble,
+              ]}
+            >
+              {msg.sender === 'assistant' && msg.model && (
+                <Text style={styles.modelBadge}>{msg.model}</Text>
+              )}
+              <Text
+                style={[
+                  styles.bubbleText,
+                  msg.sender === 'user' ? styles.userText : styles.assistantText,
+                ]}
+              >
+                {msg.text}
+              </Text>
+            </View>
+          ))
         )}
 
-        <KeyboardStickyView>
-          <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
-            <TextInput
-              style={styles.input}
-              value={text}
-              onChangeText={setText}
-              placeholder="Écrivez votre message…"
-              placeholderTextColor={colors.muted}
-              multiline
-              testID="assistant-input"
-            />
-            <Pressable
-              style={[styles.sendBtn, (!text.trim() || chat.isPending) && styles.sendBtnDisabled]}
-              onPress={() => send()}
-              disabled={!text.trim() || chat.isPending}
-              testID="assistant-send-button"
-              accessibilityRole="button"
-            >
-              <Ionicons name="arrow-up" size={22} color={colors.onBrandPrimary} />
-            </Pressable>
+        {loading && (
+          <View style={[styles.bubble, styles.assistantBubble, styles.loadingBubble]}>
+            <ActivityIndicator size="small" color="#0284c7" />
+            <Text style={styles.loadingText}>Réflexion en cours...</Text>
           </View>
-        </KeyboardStickyView>
-      </KeyboardAvoidingView>
-    </View>
+        )}
+      </ScrollView>
+
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={styles.input}
+          placeholder="Écris ton message..."
+          placeholderTextColor="#94a3b8"
+          value={input}
+          onChangeText={setInput}
+          onSubmitEditing={() => sendMessage()}
+          editable={!loading}
+        />
+        <TouchableOpacity
+          style={[styles.sendButton, (!input.trim() || loading) && styles.sendButtonDisabled]}
+          onPress={() => sendMessage()}
+          disabled={!input.trim() || loading}
+        >
+          <Text style={styles.sendButtonText}>➔</Text>
+        </TouchableOpacity>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
-const useStyles = makeStyles((colors) => ({
-  root: { flex: 1, backgroundColor: colors.surface },
-  flex: { flex: 1 },
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+  },
   header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 8,
-    paddingBottom: 8,
+    paddingTop: 16,
+    paddingBottom: 12,
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
   },
-  iconBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
-  headerTitle: { flex: 1 },
-  title: { color: colors.onSurface, fontSize: 18, fontWeight: "500" },
-  subtitle: { color: colors.muted, fontSize: 12 },
-  modelRow: { paddingBottom: 8 },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 10 },
-  emptyIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.brandTertiary,
-    alignItems: "center",
-    justifyContent: "center",
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 12,
   },
-  emptyTitle: { color: colors.onSurface, fontSize: 17, fontWeight: "500" },
-  emptyText: { color: colors.muted, fontSize: 13, textAlign: "center", lineHeight: 19 },
-  suggestions: { marginTop: 12, gap: 8, width: "100%" },
-  suggestion: {
-    backgroundColor: colors.surfaceSecondary,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 14,
-    padding: 14,
+  modelSelector: {
+    flexDirection: 'row',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 20,
+    padding: 3,
   },
-  suggestionText: { color: colors.onSurfaceSecondary, fontSize: 14 },
-  messages: { padding: 16, gap: 10 },
-  bubbleRow: { flexDirection: "row" },
-  bubbleRowUser: { justifyContent: "flex-end" },
-  bubbleRowAi: { justifyContent: "flex-start" },
-  bubble: { maxWidth: "82%", borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
-  bubbleUser: { backgroundColor: colors.brandPrimary, borderBottomRightRadius: 4 },
-  bubbleAi: {
-    backgroundColor: colors.surfaceSecondary,
-    borderWidth: 1,
-    borderColor: colors.border,
+  modelTab: {
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+  },
+  modelTabActive: {
+    backgroundColor: '#ffffff',
+    boxShadow: '0px 1px 3px rgba(0, 0, 0, 0.1)',
+  },
+  modelTabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  modelTabTextActive: {
+    color: '#0284c7',
+  },
+  chatContainer: {
+    flex: 1,
+  },
+  chatContent: {
+    padding: 16,
+    paddingBottom: 24,
+  },
+  emptyState: {
+    alignItems: 'center',
+    marginTop: 40,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 20,
+  },
+  chip: {
+    backgroundColor: '#e0f2fe',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginBottom: 10,
+    width: '100%',
+    alignItems: 'center',
+  },
+  chipText: {
+    color: '#0369a1',
+    fontWeight: '500',
+    fontSize: 14,
+  },
+  bubble: {
+    maxWidth: '85%',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 12,
+  },
+  userBubble: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#0284c7',
+    borderBottomRightRadius: 4,
+  },
+  assistantBubble: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#ffffff',
     borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
-  bubbleText: { color: colors.onSurfaceSecondary, fontSize: 15, lineHeight: 21 },
-  bubbleTextUser: { color: colors.onBrandPrimary },
-  typing: { color: colors.muted, fontSize: 14, fontStyle: "italic" },
-  inputBar: {
-    flexDirection: "row",
-    alignItems: "flex-end",
+  bubbleText: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  userText: {
+    color: '#ffffff',
+  },
+  assistantText: {
+    color: '#1e293b',
+  },
+  modelBadge: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0284c7',
+    marginBottom: 4,
+  },
+  loadingBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    backgroundColor: colors.surfaceSecondary,
+  },
+  loadingText: {
+    fontSize: 13,
+    color: '#64748b',
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    padding: 12,
+    backgroundColor: '#ffffff',
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: '#e2e8f0',
+    alignItems: 'center',
   },
   input: {
     flex: 1,
-    maxHeight: 120,
-    minHeight: 44,
-    backgroundColor: colors.surfaceTertiary,
-    borderRadius: 22,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 20,
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12,
-    color: colors.onSurface,
+    paddingVertical: 10,
     fontSize: 15,
+    color: '#0f172a',
+    maxHeight: 100,
   },
-  sendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.brandPrimary,
-    alignItems: "center",
-    justifyContent: "center",
+  sendButton: {
+    marginLeft: 8,
+    backgroundColor: '#0284c7',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  sendBtnDisabled: { opacity: 0.4 },
-}));
+  sendButtonDisabled: {
+    backgroundColor: '#cbd5e1',
+  },
+  sendButtonText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+});
