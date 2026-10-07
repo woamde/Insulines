@@ -139,3 +139,5 @@ async def ai_chat(chat: ChatRequest):
     return {
         "response": f"Reçu : '{chat.message}'. Assistant GlycoSoin opérationnel."
     }
+    
+    # Déploiement CGM
