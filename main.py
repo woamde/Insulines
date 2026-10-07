@@ -111,6 +111,7 @@ async def save_cgm_config(payload: CGMAuthPayload):
     return {"status": "success", "message": "Configuration enregistrée avec succès."}
 
 @app.get("/api/cgm/latest")
+@app.get("/cgm/latest")
 async def get_latest_glucose():
     return {
         "value_mgdl": 120,
