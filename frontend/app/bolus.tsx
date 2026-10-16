@@ -9,7 +9,7 @@ import {
   Alert,
 } from 'react-native';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8002";
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 // Profil temporaire (à brancher sur votre API FastAPI / profil utilisateur)
 const USER_PROFILE = {
@@ -65,7 +65,7 @@ export default function BolusCalculatorScreen() {
         'Content-Type': 'application/json',
       };
       if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+        headers['Authorization'] = 'Bearer ' + token;
       }
 
       // Horodatage unique et partagé pour lier parfaitement la glycémie et l'insuline dans le journal

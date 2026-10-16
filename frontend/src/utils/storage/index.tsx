@@ -18,7 +18,7 @@ export default function Index() {
   useEffect(() => {
   // On ne déclenche la validation QUE si le code ET le state existent dans l'URL
   if (params.code && params.state) {
-    fetch('http://localhost:8002/api/auth/google/callback', {
+    fetch('http://127.0.0.1:8000/api/auth/google/callback', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

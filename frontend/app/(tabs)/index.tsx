@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -82,16 +82,35 @@ export default function HomeScreen() {
         if (name) setProfileName(name);
       }
 
-      // Charger la dernière mesure du journal
-      let journalRes = await fetch(`${API_BASE_URL}/api/journal?limit=5`, { signal });
+      // Charger la dernière mesure du journal (supporte API_BASE_URL contenant /api)
+      const cleanBase = API_BASE_URL.replace(/\/$/, '');
+      const journalUrl = cleanBase.endsWith('/api') ? `${cleanBase}/journal?limit=5` : `${cleanBase}/api/journal?limit=5`;
+      let journalRes = await fetch(journalUrl, { signal });
       if (!journalRes.ok) {
-        journalRes = await fetch(`${API_BASE_URL}/journal?limit=5`, { signal });
+        // Fallback without /api
+        const fallbackUrl = journalUrl.replace(/\/api\/api\//, '/api/').replace(/\/api\/$/, '/');
+        journalRes = await fetch(fallbackUrl, { signal });
       }
 
       if (journalRes.ok) {
-        const journalData: MeasureItem[] = await journalRes.json();
-        if (Array.isArray(journalData) && journalData.length > 0) {
-          setLastMeasure(journalData[0]);
+        const data = await journalRes.json();
+        let journalData: MeasureItem[] = [];
+        if (Array.isArray(data)) journalData = data;
+        else if (data && Array.isArray((data as any).journal)) journalData = (data as any).journal;
+        if (journalData.length > 0) {
+          const hasTimestamps = journalData.some((it) => !!it.timestamp);
+          if (hasTimestamps) {
+            // Trier par timestamp descendant
+            journalData.sort((a, b) => {
+              const ta = a.timestamp ? Date.parse(a.timestamp) : 0;
+              const tb = b.timestamp ? Date.parse(b.timestamp) : 0;
+              return tb - ta;
+            });
+            setLastMeasure(journalData[0]);
+          } else {
+            // Pas de timestamps : prendre la dernière entrée renvoyée par l'API (probablement la plus récente)
+            setLastMeasure(journalData[journalData.length - 1]);
+          }
         }
       }
       setLastSyncText("à l'instant");
@@ -112,8 +131,19 @@ export default function HomeScreen() {
     }, [])
   );
 
-  const glucoseValue = lastMeasure?.glucose?.value ?? lastMeasure?.value;
-  const statusInfo = getGlucoseStatus(glucoseValue);
+  // Ensure initial data load on mount (useful for web where focus hooks may not fire)
+  useEffect(() => {
+    const controller = new AbortController();
+    loadData(controller);
+    return () => controller.abort();
+  }, []);
+
+
+  // Normaliser la valeur de glycémie provenant de différentes formes d'API
+  const glucoseValue = lastMeasure ? (
+    lastMeasure.glucose?.value ?? (lastMeasure as any).value ?? (lastMeasure as any).value_mgdl ?? null
+  ) : null;
+  const statusInfo = getGlucoseStatus(glucoseValue ?? undefined);
   const initialLetter = profileName ? profileName.charAt(0).toUpperCase() : 'A';
 
   return (

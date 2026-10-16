@@ -11,3 +11,5 @@ node_modules/
 venv/
 dist/
 build/
+# Local frontend environment (contains client IDs / secrets) - keep private
+frontend/.env

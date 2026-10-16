@@ -17,7 +17,14 @@ export default function JournalScreen() {
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
-        setItems(Array.isArray(data) ? data : []);
+        // Support both plain array responses and responses shaped as { journal: [...] }
+        if (Array.isArray(data)) {
+          setItems(data);
+        } else if (data && Array.isArray((data as any).journal)) {
+          setItems((data as any).journal);
+        } else {
+          setItems([]);
+        }
       } else {
         setItems([]);
       }

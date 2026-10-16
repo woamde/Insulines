@@ -12,7 +12,7 @@ import {
 import { useFocusEffect } from 'expo-router';
 import { LineChart } from 'react-native-chart-kit';
 
-const RAW_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.140:8002';
+const RAW_URL = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 const API_BASE_URL = RAW_URL.endsWith('/api') ? RAW_URL.slice(0, -4) : RAW_URL;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 

@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 const TOKEN_KEY = 'user_token';
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8002/api';
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
 
 // --- Stockage du Token ---
 
@@ -54,7 +54,7 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}): Pro
   };
 
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers['Authorization'] = 'Bearer ' + token;
   }
 
   const cleanBase = API_BASE_URL.replace(/\/$/, '');
