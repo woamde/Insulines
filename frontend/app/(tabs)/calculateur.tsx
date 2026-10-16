@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
 
-const API_BASE_URL = 'http://127.0.0.1:8002/api';
+const API_BASE_URL = 'http://127.0.0.1:8000/api';
 
 export default function CalculateurScreen() {
   const [glycemia, setGlycemia] = useState<string>('');

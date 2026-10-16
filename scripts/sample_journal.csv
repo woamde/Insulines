@@ -1,0 +1,4 @@
+value_mgdl,insulin_units,meal_carbs,notes,measured_at
+150,0.0,0,Test entry A,2026-10-16T09:00:00Z
+155,0.0,0,Test entry B,2026-10-16T09:05:00Z
+120,1.5,30,Post-meal,2026-10-16T12:30:00Z

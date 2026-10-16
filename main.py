@@ -141,3 +141,39 @@ async def ai_chat(chat: ChatRequest):
     }
     
     # Déploiement CGM
+
+# --- Endpoint pour recevoir des données CGM réelles (push depuis un adaptateur externe) ---
+class SyncEntryPayload(BaseModel):
+    value_mgdl: Optional[float] = None
+    insulin_units: Optional[float] = None
+    meal_carbs: Optional[float] = None
+    notes: Optional[str] = None
+    source: Optional[str] = None
+    measured_at: Optional[str] = None
+
+@app.post("/api/cgm/sync")
+async def cgm_sync(entries: List[SyncEntryPayload]):
+    """Accept a batch of CGM/journal entries pushed by an external synchronizer (LibreLinkUp adapter or webhook).
+    Example payload: [{ "value_mgdl": 120, "measured_at": "2026-10-16T09:00:00Z", "source": "librelinkup" }, ...]
+    This endpoint inserts each entry into the glucose_readings collection (if available).
+    """
+    inserted = 0
+    errors: List[Dict[str, Any]] = []
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+    for idx, e in enumerate(entries):
+        try:
+            doc = e.model_dump()
+            # Normalize timestamp field name if present
+            if doc.get("measured_at"):
+                doc["timestamp"] = doc.pop("measured_at")
+            db["glucose_readings"].insert_one(doc)
+            inserted += 1
+        except Exception as exc:
+            errors.append({"index": idx, "error": str(exc)})
+    return {"status": "ok", "inserted": inserted, "errors": errors}
+
+# Small helper endpoint to check sync adapter health
+@app.get("/api/cgm/sync/health")
+async def cgm_sync_health():
+    return {"status": "ok", "message": "CGM sync endpoint is reachable"}
